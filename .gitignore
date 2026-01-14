@@ -1,1 +1,4 @@
 .env
+
+# stores info about the psychopy runs
+/data_collection/data
