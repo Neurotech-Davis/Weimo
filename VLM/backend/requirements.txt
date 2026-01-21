@@ -1,0 +1,23 @@
+fastapi
+pydantic
+pydantic_settings
+uvicorn
+sqlalchemy
+pgvector
+asyncpg
+databases
+psycopg2-binary
+requests
+lxml_html_clean
+
+# The below are needed for testing
+httpx
+pytest # THIS IS NEEDED FOR THE TESTING, I EXPLAIN IN DOCS
+
+# Below are needed for VLM inference
+huggingface_hub
+torch
+transformers
+Pillow
+bitsandbytes
+accelerate
