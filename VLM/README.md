@@ -34,11 +34,18 @@ ssh chengyi@tailscale_ip
 # On remote machine
 cd backend/
 ./restart.sh
+uvicorn src.app.main:app --proxy-headers --host 0.0.0.0 --port 8000
 ```
+* Go into browser and paste this in:
+```
+http://0.0.0.0:800/ping
+```
+* Make sure it returns "pong"
 
 5. Set up Ngrok for tunneling
 ```bash
 # On remote machine
+sudo snap install ngrok
 
 ```
 

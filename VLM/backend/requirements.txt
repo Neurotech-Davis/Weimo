@@ -21,3 +21,5 @@ transformers
 Pillow
 bitsandbytes
 accelerate
+base64
+io

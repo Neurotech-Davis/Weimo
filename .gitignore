@@ -1,4 +1,7 @@
+# VLM API
 .env
+vlmAPI/
+__pycache__/
 
 # stores info about the psychopy runs
 /data_collection/data
