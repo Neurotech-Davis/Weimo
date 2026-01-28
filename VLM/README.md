@@ -7,7 +7,7 @@ Setting up SSH (assuming linux environment):
 # On remote machine
 sudo systemctl start ssh
 sudo systemctl enable ssh
-sudo systemctl status ssh   
+sudo systemctl status ssh
 sudo systemctl status sshd
 ```
 
@@ -28,3 +28,17 @@ tailscale ip
 # On edge device
 ssh chengyi@tailscale_ip
 ```
+
+4. Spin up the backend
+```bash
+# On remote machine
+cd backend/
+./restart.sh
+```
+
+5. Set up Ngrok for tunneling
+```bash
+# On remote machine
+
+```
+

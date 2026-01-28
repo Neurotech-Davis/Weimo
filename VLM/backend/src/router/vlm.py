@@ -20,7 +20,7 @@ class URL(BaseModel):
     image_path: Optional[str]
 
 # Define router
-@bias_router.post("/analyze")
+@vlm_router.post("/analyze")
 def analyze(input: URL):
 
     # Define inputs

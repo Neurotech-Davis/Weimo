@@ -3,13 +3,21 @@ import torch
 from PIL import Image
 from transformers.image_utils import load_image
 
+DEBUG = True
+
 # Just a class
 class VLM():
 
     # Initialize variables
     def __init__(self, model_name, processor_name):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.load_VLM_hf()
+
+        if DEBUG:
+            self.device = None
+            self.processor = None
+            self.model = None
+        else:
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.load_VLM_hf()
 
     # Loads VLM through HuggingFace
     def load_VLM_hf(self, processor_name="HuggingFaceTB/SmolVLM-Instruct", model_name="HuggingFaceTB/SmolVLM-Instruct"):
@@ -54,6 +62,9 @@ class VLM():
 
     # Runs inference
     def inference(self, system_prompt="", message_prompt="", image_path=""):
+
+        if DEBUG:
+            return "It works"
 
         # Format input
         image1, messages = self.format_input(system_prompt=system_prompt,

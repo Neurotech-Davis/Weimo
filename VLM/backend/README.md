@@ -1,5 +1,11 @@
+
+Set up the backend server on the host machine:
+
 ```bash
-docker-compose down -v                             # Takes down the running containers (allowing refreshing)
-docker-compose up --build -d                       # Runs containers, initializing them
-docker-compose logs {name of container (api)} # Debugging purposes
+./restart.sh
 ```
+
+Setting up Ngrok
+* "If it works on localhost, it will work on Ngrok"
+* Ngrok is like a middle-man that handles tunneling. Here's the flow for traffic:
+  * My laptop's localhost -> Ngrok -> My apartment's server running on locahost

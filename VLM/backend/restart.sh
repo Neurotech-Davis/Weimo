@@ -3,4 +3,3 @@ docker-compose down          # Takes down the running containers (allowing refre
 docker-compose up --build -d # Runs containers, initializing them. -d is detach
 sleep 1                      # if it runs instantly it can't tell if it will crash or not
 docker ps -a
-# docker-compose logs {name of container (api / db)} # Debugging purposes

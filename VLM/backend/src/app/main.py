@@ -10,8 +10,6 @@ from src.router.vlm import vlm_router
 # Attributes:
 #     HF_KEY: str
 
-models.Base.metadata.create_all(bind=engine)
-
 app = FastAPI()
 
 origins = [
