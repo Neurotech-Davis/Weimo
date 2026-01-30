@@ -1,9 +1,6 @@
-from transformers import AutoProcessor, AutoModelForVision2Seq
+from transformers import AutoProcessor, Idefics2ForConditionalGeneration
 import torch
-from PIL import Image
 from transformers.image_utils import load_image
-import base64
-import io
 
 DEBUG = True
 
@@ -17,6 +14,7 @@ class VLModel():
             self.device = None
             self.processor = None
             self.model = None
+
         else:
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
             self.load_VLM_hf(model_name=model_name, processor_name=processor_name)
@@ -24,27 +22,24 @@ class VLModel():
     # Loads VLM through HuggingFace
     def load_VLM_hf(self, processor_name, model_name):
         self.processor = AutoProcessor.from_pretrained(processor_name)
-        self.model = AutoModelForVision2Seq.from_pretrained(model_name,
-                                                        dtype=torch.bfloat16,
-                                                        _attn_implementation="flash_attention_2" if self.device == "cuda" else "eager").to(self.device)
+        self.model = Idefics2ForConditionalGeneration.from_pretrained(model_name,
+                                                        torch_dtype=torch.bfloat16,
+                                                        attn_implementation="flash_attention_2" if self.device == "cuda" else "eager").to(self.device)
 
     # Preprocess model inputs
-    def format_input(self, system_prompt="", message_prompt="", bs64_bytes=""):
+    def format_input(self, system_prompt="", message_prompt="", image=""):
 
         # Default inputs
         if system_prompt=="":
             system_prompt = "You are a VLM that is designed to detect obstacles to ensure a safe route for wheelchair users."
         if message_prompt=="":
             message_prompt = "Going forward, are there any obstacles to be aware of?"
-        if bs64_bytes=="":
+        if image=="":
             print("Error: No image recieved")
             return None
 
         # Load image
-        decoded_bytes = base64.b64decode(bs64_bytes)
-        image_bytes = io.BytesIO(decoded_bytes)
-        pil_image = Image.open(image_bytes)
-        image1 = load_image(pil_image)
+        image1 = load_image(image)
 
         # Create input messages
         messages = [
@@ -66,7 +61,7 @@ class VLModel():
         return image1, messages
 
     # Runs inference
-    def inference(self, system_prompt="", message_prompt="", bs64_bytes=""):
+    def inference(self, system_prompt="", message_prompt="", image=""):
 
         if DEBUG:
             return "It works"
@@ -74,9 +69,7 @@ class VLModel():
         # Format input
         image1, messages = self.format_input(system_prompt=system_prompt,
                                         message_prompt=message_prompt,
-                                        bs64_bytes=bs64_bytes,
-                                        processor=self.processor,
-                                        model=self.model)
+                                        image=image)
 
         # Prepare inputs
         prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True)

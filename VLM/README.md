@@ -46,6 +46,7 @@ http://0.0.0.0:800/ping
 ```bash
 # On remote machine
 sudo snap install ngrok
-
+ngrok config add-authtoken <token> # Grab token by signing up for an account
+ngrok http 80 # This is where we held the backend
 ```
 

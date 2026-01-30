@@ -5,14 +5,14 @@
 # On remote machine
 cd backend/
 ./restart.sh
-uvicorn src.app.main:app --proxy-headers --host 0.0.0.0 --port 8000
 ```
 * Go into browser and paste this in:
 ```
-http://0.0.0.0:800/ping
+http://0.0.0.0:8000/ping
 ```
 * Make sure it returns "pong"
 
+NOTE: Might have to remove "AutoModelForVision2Seq"
 TODO: There might be a better way to organize this backend project
 
 ## 2) Setting up Ngrok

@@ -1,11 +1,11 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form
 from pydantic import BaseModel
 from src.utils.vlm import (
     VLModel,
 )
-from pathlib import Path
-from typing import Optional, Dict
-import json
+from typing import Optional
+from PIL import Image
+import io
 
 # Initialize router
 vlm_router = APIRouter()
@@ -14,19 +14,24 @@ vlm_router = APIRouter()
 vlm = VLModel()
 
 # Define request schema
-class URL(BaseModel):
+class Prompts(BaseModel):
     system_prompt: Optional[str] = None
     message_prompt: Optional[str] = None
-    bs64_bytes: Optional[bytes] = None
 
 # Define router
 @vlm_router.post("/analyze")
-def analyze(input: URL):
+async def analyze(system_prompt: Optional[str] = Form(None),
+            message_prompt: Optional[str] = Form(None),
+            image: UploadFile = File(...)):
+
+    # Read image
+    contents = await image.read()
+    pil_image = Image.open(io.BytesIO(contents)).convert("RGB")
 
     # Define inputs
     system_prompt = input.system_prompt or ""
     message_prompt = input.message_prompt or ""
-    bs64_bytes = input.bs64_bytes
+    image = pil_image
 
     # Inference
-    return vlm.inference(system_prompt=system_prompt, message_prompt=message_prompt, bs64_bytes=bs64_bytes)
+    return vlm.inference(system_prompt=system_prompt, message_prompt=message_prompt, image=image)

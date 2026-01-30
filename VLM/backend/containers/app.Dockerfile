@@ -5,7 +5,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 		&& rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY requirements.txt ./
-RUN pip install --no-cache-dir --upgrade -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade -r requirements.txt
 # RUN pip install flash-attn --no-build-isolation # Commented out for debugging purposes
 COPY . .
 CMD ["uvicorn", "src.app.main:app", "--proxy-headers", "--host", "0.0.0.0", "--port", "80"]

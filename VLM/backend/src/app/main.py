@@ -13,7 +13,7 @@ from src.router.vlm import vlm_router
 app = FastAPI()
 
 origins = [
-    "http://localhost:3000",  # Front end
+    "http://localhost:3000",  # Front end (Not sure if I need this)
 ]
 app.add_middleware(
     CORSMiddleware,

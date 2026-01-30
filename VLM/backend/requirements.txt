@@ -1,25 +1,18 @@
-fastapi
-pydantic
-pydantic_settings
-uvicorn
-sqlalchemy
-pgvector
-asyncpg
-databases
-psycopg2-binary
-requests
-lxml_html_clean
+fastapi==0.109.0
+uvicorn==0.27.0
+pydantic==2.5.3
+pydantic_settings==2.1.0
+python-multipart==0.0.6
+requests==2.31.0
 
-# The below are needed for testing
-httpx
-pytest # THIS IS NEEDED FOR THE TESTING, I EXPLAIN IN DOCS
+transformers==4.45.0
+accelerate==0.25.0
+safetensors==0.4.1
+sentencepiece==0.1.99
+protobuf==4.25.2
 
-# Below are needed for VLM inference
-huggingface_hub
+bitsandbytes==0.41.3
+Pillow==10.2.0
+
 torch
-transformers
-Pillow
-bitsandbytes
-accelerate
-base64
-io
+huggingface_hub
