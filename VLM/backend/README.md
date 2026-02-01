@@ -16,6 +16,7 @@ NOTE: Might have to remove "AutoModelForVision2Seq"
 TODO: There might be a better way to organize this backend project
 
 ## 2) Setting up Ngrok
+* Rest of the instructions are in `VLM/README.md`
 * "If it works on localhost, it will work on Ngrok"
 * Ngrok is like a middle-man that handles tunneling. Here's the flow for traffic:
   * My laptop's localhost -> Ngrok -> My apartment's server running on locahost

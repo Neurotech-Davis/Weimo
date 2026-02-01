@@ -34,19 +34,20 @@ ssh chengyi@tailscale_ip
 # On remote machine
 cd backend/
 ./restart.sh
-uvicorn src.app.main:app --proxy-headers --host 0.0.0.0 --port 8000
 ```
 * Go into browser and paste this in:
 ```
-http://0.0.0.0:800/ping
+http://0.0.0.0:8000/ping
 ```
 * Make sure it returns "pong"
 
 5. Set up Ngrok for tunneling
+    - First time: Follow the instructions [here](https://ngrok.com/download/linux?tab=install)
+        - Make sure you use the correct port (I used 8000 for backend)
+        - Once it's set up, copy and paste the https request for and call the API.
+    - Next time: 
 ```bash
 # On remote machine
-sudo snap install ngrok
-ngrok config add-authtoken <token> # Grab token by signing up for an account
-ngrok http 80 # This is where we held the backend
+ngrok config add-authtoken {auth_token}
+ngrok http 8000
 ```
-
