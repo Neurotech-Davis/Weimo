@@ -2,7 +2,6 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
 from src.config.config import Settings, get_settings
 from src.router.vlm import vlm_router
 
