@@ -1,0 +1,20 @@
+
+### Python opts
+
+2.5k - http://github.com/antoinelame/GazeTracking
+1.7k - https://github.com/natanielruiz/deep-head-pose
+529 - https://github.com/NativeSensors/EyeGestures
+747 - https://github.com/esdalmaijer/PyGaze
+529 - https://github.com/NativeSensors/EyeGestures
+232 - https://github.com/ck-zhang/EyeTrax
+63 - https://github.com/algoasylum/pyEyeTrack
+
+### Js opts
+3.8k - https://github.com/brownhci/WebGazer
+
+### Google?
+
+33.5k - Mediapipe
+- https://github.com/google-ai-edge/mediapipe?tab=readme-ov-file
+- https://research.google/blog/mediapipe-iris-real-time-iris-tracking-depth-estimation/
+
