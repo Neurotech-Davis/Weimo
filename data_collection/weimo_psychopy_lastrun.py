@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 This experiment was created using PsychoPy3 Experiment Builder (v2024.2.4),
-    on January 20, 2026, at 18:42
+    on February 12, 2026, at 19:35
 If you publish work using this script the most relevant publication is:
 
     Peirce J, Gray JR, Simpson S, MacAskill M, Höchenberger R, Sogo H, Kastman E, Lindeløv JK. (2019) 
@@ -34,13 +34,14 @@ import psychopy.iohub as io
 from psychopy.hardware import keyboard
 
 # Run 'Before Experiment' code from set_params
-numReps = 2
+numReps = 1 # will be multiplied by 6
 # number of loops per block
 numBlocks = 2
 # number of blocks
-numPractice = 2
+numPractice = 1 # will be multiplied by 2
 # number of practice reps
-
+numJawReps = 2 
+numJawBlocks = 2
 # --- Setup global variables (available in all functions) ---
 # create a device manager to handle hardware (keyboards, mice, mirophones, speakers, etc.)
 deviceManager = hardware.DeviceManager()
@@ -134,7 +135,7 @@ def setupData(expInfo, dataDir=None):
     thisExp = data.ExperimentHandler(
         name=expName, version='',
         extraInfo=expInfo, runtimeInfo=None,
-        originPath='\\\\wsl.localhost\\Ubuntu\\home\\aarpila\\projects\\Weimo\\data_collection\\weimo_psychopy_lastrun.py',
+        originPath='\\\\wsl.localhost\\Ubuntu\\home\\aarpila\\projects\\weimo\\data_collection\\weimo_psychopy_lastrun.py',
         savePickle=True, saveWideText=True,
         dataFileName=dataDir + os.sep + filename, sortColumns='time'
     )
@@ -792,11 +793,15 @@ def run(expInfo, thisExp, win, globalClock=None, thisSession=None):
     # set up handler to look after randomisation of conditions etc
     practice = data.TrialHandler2(
         name='practice',
-        nReps=numPractice, 
+        nReps=1.0, 
         method='random', 
         extraInfo=expInfo, 
         originPath=-1, 
-        trialList=data.importConditions('stimuli_sheet.xlsx'), 
+        trialList=data.importConditions(
+        'stimuli_sheet.xlsx', 
+        selection='0:2'
+    )
+    , 
         seed=None, 
     )
     thisExp.addLoop(practice)  # add the loop to the experiment
@@ -1075,7 +1080,7 @@ def run(expInfo, thisExp, win, globalClock=None, thisSession=None):
         clip.status = NOT_STARTED
         continueRoutine = True
         # update component parameters for each repeat
-        movie.setMovie(thisClip)
+        movie.setMovie(thisClipPrac)
         # store start times for clip
         clip.tStartRefresh = win.getFutureFlipTime(clock=globalClock)
         clip.tStart = globalClock.getTime(format='float')
@@ -1312,7 +1317,7 @@ def run(expInfo, thisExp, win, globalClock=None, thisSession=None):
             routineTimer.addTime(-4.000000)
         thisExp.nextEntry()
         
-    # completed numPractice repeats of 'practice'
+    # completed 1.0 repeats of 'practice'
     
     if thisSession is not None:
         # if running in a Session with a Liaison client, send data up to now
@@ -1776,7 +1781,7 @@ def run(expInfo, thisExp, win, globalClock=None, thisSession=None):
             clip.status = NOT_STARTED
             continueRoutine = True
             # update component parameters for each repeat
-            movie.setMovie(thisClip)
+            movie.setMovie(thisClipPrac)
             # store start times for clip
             clip.tStartRefresh = win.getFutureFlipTime(clock=globalClock)
             clip.tStart = globalClock.getTime(format='float')
@@ -2293,7 +2298,7 @@ def run(expInfo, thisExp, win, globalClock=None, thisSession=None):
     # set up handler to look after randomisation of conditions etc
     jblock = data.TrialHandler2(
         name='jblock',
-        nReps=numBlocks, 
+        nReps=numJawBlocks, 
         method='random', 
         extraInfo=expInfo, 
         originPath=-1, 
@@ -2324,7 +2329,7 @@ def run(expInfo, thisExp, win, globalClock=None, thisSession=None):
         # set up handler to look after randomisation of conditions etc
         jaw_trials = data.TrialHandler2(
             name='jaw_trials',
-            nReps=numReps, 
+            nReps=numJawReps, 
             method='random', 
             extraInfo=expInfo, 
             originPath=-1, 
@@ -2599,7 +2604,7 @@ def run(expInfo, thisExp, win, globalClock=None, thisSession=None):
                 routineTimer.addTime(-3.000000)
             thisExp.nextEntry()
             
-        # completed numReps repeats of 'jaw_trials'
+        # completed numJawReps repeats of 'jaw_trials'
         
         if thisSession is not None:
             # if running in a Session with a Liaison client, send data up to now
@@ -2729,7 +2734,7 @@ def run(expInfo, thisExp, win, globalClock=None, thisSession=None):
             routineTimer.addTime(-3.000000)
         thisExp.nextEntry()
         
-    # completed numBlocks repeats of 'jblock'
+    # completed numJawBlocks repeats of 'jblock'
     
     if thisSession is not None:
         # if running in a Session with a Liaison client, send data up to now
