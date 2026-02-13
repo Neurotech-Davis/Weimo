@@ -2,6 +2,7 @@
 .env
 vlmAPI/
 __pycache__/
+.venv/
 
 # stores info about the psychopy runs
 /data_collection/data

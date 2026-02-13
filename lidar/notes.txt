@@ -1,0 +1,4 @@
+Driver download:
+1. https://www.silabs.com/software-and-tools/usb-to-uart-bridge-vcp-drivers?tab=downloads
+2. Extract zip folder
+3. find silabser.inf file. Install this

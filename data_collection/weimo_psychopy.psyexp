@@ -98,8 +98,8 @@
         <Param val="False" valType="bool" updates="None" name="useWindowParams"/>
       </RoutineSettingsComponent>
       <CodeComponent name="set_params" plugin="None">
-        <Param val="numReps = 2&amp;#10;# number of loops per block&amp;#10;numBlocks = 2&amp;#10;# number of blocks&amp;#10;numPractice = 2&amp;#10;# number of practice reps&amp;#10;" valType="extendedCode" updates="constant" name="Before Experiment"/>
-        <Param val="numReps = 2;&amp;#10;numBlocks = 2;&amp;#10;numPractice = 2;&amp;#10;" valType="extendedCode" updates="constant" name="Before JS Experiment"/>
+        <Param val="numReps = 4 # will be multiplied by 6&amp;#10;# number of loops per block&amp;#10;numBlocks = 3&amp;#10;# number of blocks&amp;#10;numPractice = 1 # will be multiplied by 2&amp;#10;# number of practice reps&amp;#10;numJawReps = 12 &amp;#10;numJawBlocks = 2" valType="extendedCode" updates="constant" name="Before Experiment"/>
+        <Param val="numReps = 4;&amp;#10;numBlocks = 3;&amp;#10;numPractice = 1;&amp;#10;numJawReps = 12;&amp;#10;numJawBlocks = 2;&amp;#10;" valType="extendedCode" updates="constant" name="Before JS Experiment"/>
         <Param val="" valType="extendedCode" updates="constant" name="Begin Experiment"/>
         <Param val="" valType="extendedCode" updates="constant" name="Begin JS Experiment"/>
         <Param val="" valType="extendedCode" updates="constant" name="Begin JS Routine"/>
@@ -543,7 +543,7 @@
         <Param val="" valType="code" updates="None" name="durationEstim"/>
         <Param val="False" valType="bool" updates="constant" name="forceEndRoutine"/>
         <Param val="False" valType="bool" updates="None" name="loop"/>
-        <Param val="$thisClip" valType="file" updates="set every repeat" name="movie"/>
+        <Param val="$thisClipPrac" valType="file" updates="set every repeat" name="movie"/>
         <Param val="movie" valType="code" updates="None" name="name"/>
         <Param val="" valType="num" updates="constant" name="opacity"/>
         <Param val="0" valType="num" updates="constant" name="ori"/>
@@ -677,13 +677,13 @@
     <Routine name="parameters"/>
     <Routine name="welcome"/>
     <LoopInitiator loopType="TrialHandler" name="practice">
-      <Param name="Selected rows" updates="None" val="" valType="str"/>
-      <Param name="conditions" updates="None" val="[{'thisClip': 'videos/walking1.mp4'}, {'thisClip': 'videos/walking2.mp4'}, {'thisClip': 'videos/walking3.mp4'}, {'thisClip': 'videos/walking4.mp4'}, {'thisClip': 'videos/walking5.mp4'}, {'thisClip': 'videos/walking6.mp4'}]" valType="str"/>
+      <Param name="Selected rows" updates="None" val="0:2" valType="str"/>
+      <Param name="conditions" updates="None" val="[{'thisClip': 'videos/walking1.mp4', 'thisClipPrac': 'videos/walking1.mp4'}, {'thisClip': 'videos/walking2.mp4', 'thisClipPrac': 'videos/walking2.mp4'}, {'thisClip': 'videos/walking3.mp4', 'thisClipPrac': None}, {'thisClip': 'videos/walking4.mp4', 'thisClipPrac': None}, {'thisClip': 'videos/walking5.mp4', 'thisClipPrac': None}, {'thisClip': 'videos/walking6.mp4', 'thisClipPrac': None}]" valType="str"/>
       <Param name="conditionsFile" updates="None" val="stimuli_sheet.xlsx" valType="file"/>
       <Param name="endPoints" updates="None" val="[0, 1]" valType="num"/>
       <Param name="isTrials" updates="None" val="True" valType="bool"/>
       <Param name="loopType" updates="None" val="random" valType="str"/>
-      <Param name="nReps" updates="None" val="numPractice" valType="num"/>
+      <Param name="nReps" updates="None" val="1" valType="num"/>
       <Param name="name" updates="None" val="practice" valType="code"/>
       <Param name="random seed" updates="None" val="" valType="code"/>
     </LoopInitiator>
@@ -706,7 +706,7 @@
     </LoopInitiator>
     <LoopInitiator loopType="TrialHandler" name="trials">
       <Param name="Selected rows" updates="None" val="" valType="str"/>
-      <Param name="conditions" updates="None" val="[{'thisClip': 'videos/walking0.mp4'}, {'thisClip': 'videos/walking1.mp4'}, {'thisClip': 'videos/walking2.mp4'}, {'thisClip': 'videos/walking3.mp4'}, {'thisClip': 'videos/walking4.mp4'}, {'thisClip': 'videos/walking5.mp4'}, {'thisClip': 'videos/walking6.mp4'}]" valType="str"/>
+      <Param name="conditions" updates="None" val="[{'thisClip': 'videos/walking1.mp4'}, {'thisClip': 'videos/walking2.mp4'}, {'thisClip': 'videos/walking3.mp4'}, {'thisClip': 'videos/walking4.mp4'}, {'thisClip': 'videos/walking5.mp4'}, {'thisClip': 'videos/walking6.mp4'}]" valType="str"/>
       <Param name="conditionsFile" updates="None" val="stimuli_sheet.xlsx" valType="file"/>
       <Param name="endPoints" updates="None" val="[0, 1]" valType="num"/>
       <Param name="isTrials" updates="None" val="True" valType="bool"/>
@@ -730,7 +730,7 @@
       <Param name="endPoints" updates="None" val="[0, 1]" valType="num"/>
       <Param name="isTrials" updates="None" val="True" valType="bool"/>
       <Param name="loopType" updates="None" val="random" valType="str"/>
-      <Param name="nReps" updates="None" val="numBlocks" valType="num"/>
+      <Param name="nReps" updates="None" val="numJawBlocks" valType="num"/>
       <Param name="name" updates="None" val="jblock" valType="code"/>
       <Param name="random seed" updates="None" val="" valType="code"/>
     </LoopInitiator>
@@ -741,7 +741,7 @@
       <Param name="endPoints" updates="None" val="[0, 1]" valType="num"/>
       <Param name="isTrials" updates="None" val="True" valType="bool"/>
       <Param name="loopType" updates="None" val="random" valType="str"/>
-      <Param name="nReps" updates="None" val="numReps" valType="num"/>
+      <Param name="nReps" updates="None" val="numJawReps" valType="num"/>
       <Param name="name" updates="None" val="jaw_trials" valType="code"/>
       <Param name="random seed" updates="None" val="" valType="code"/>
     </LoopInitiator>
