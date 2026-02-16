@@ -47,9 +47,9 @@ class VLModel():
 
         # Default inputs
         if system_prompt == "":
-            system_prompt = "You are a VLM that is designed to detect obstacles to ensure a safe route for wheelchair users."
+            system_prompt = "You are a VLM that is designed think critically about images. The answer will not always be a straightforward yes, but will require careful decision making. Consider the user's question and analyze the given image for relevant information to inform your decision."
         if message_prompt == "":
-            message_prompt = "Going forward, are there any obstacles to be aware of?"
+            message_prompt = "Describe this image."
         if image is None:
             print("Error: No image received")
             return None, None
