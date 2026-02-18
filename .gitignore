@@ -10,6 +10,7 @@ __pycache__/
 *.psydat
 *.edf
 *.dsi
+*.fif
 
 # stores info about the psychopy runs
 /data_collection/data

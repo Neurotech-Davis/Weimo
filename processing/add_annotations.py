@@ -120,7 +120,7 @@ def annotate(pairs, output_folder, eeg_folder, psychopy_folder):
         raw.set_annotations(annotation)
 
         # save
-        
+        raw.save(f'{output_folder}/{eeg_file}.fif', overwrite=True)
 
 
 
