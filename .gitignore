@@ -4,5 +4,12 @@ vlmAPI/
 __pycache__/
 .venv/
 
+# data files
+*.csv
+*.log
+*.psydat
+*.edf
+*.dsi
+
 # stores info about the psychopy runs
 /data_collection/data
