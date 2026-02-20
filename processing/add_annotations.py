@@ -97,7 +97,10 @@ def annotate(pairs, output_folder, eeg_folder, psychopy_folder):
         # establish psychopy time
         df = pd.read_csv(f'{psychopy_folder}/{psycho_file}')
         psychopy_time = get_psycho_time(df)
-        # get stimulus onset times
+
+
+        # get stimulus onset times for movement
+        # TODO: times for jaw clenches
         movement_times = df['go_txt.started'].tolist()
         clean_move_times = [x for x in movement_times if not math.isnan(x)]
 
