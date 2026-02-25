@@ -1,0 +1,17 @@
+import mne
+from  import annotations
+
+from pathlib import Path
+import json
+import numpy as np
+
+
+#check if the file is annotated correctly 
+raw = mne.io.read_raw_fif("path/to/_annotated.fif", preload=False)
+print(raw.annotations[:10])
+events, event_id = mne.events_from_annotations(raw)
+print(event_id, events.shape)
+
+#detail what intent to move means
+
+
