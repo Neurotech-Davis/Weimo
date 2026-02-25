@@ -98,8 +98,8 @@
         <Param val="False" valType="bool" updates="None" name="useWindowParams"/>
       </RoutineSettingsComponent>
       <CodeComponent name="set_params" plugin="None">
-        <Param val="numReps = 4 # will be multiplied by 6&amp;#10;# number of loops per block&amp;#10;numBlocks = 3&amp;#10;# number of blocks&amp;#10;numPractice = 1 # will be multiplied by 2&amp;#10;# number of practice reps&amp;#10;numJawReps = 12 &amp;#10;numJawBlocks = 2" valType="extendedCode" updates="constant" name="Before Experiment"/>
-        <Param val="numReps = 4;&amp;#10;numBlocks = 3;&amp;#10;numPractice = 1;&amp;#10;numJawReps = 12;&amp;#10;numJawBlocks = 2;&amp;#10;" valType="extendedCode" updates="constant" name="Before JS Experiment"/>
+        <Param val="numReps = 4 # will be multiplied by 6&amp;#10;# number of loops per block&amp;#10;numBlocks = 4&amp;#10;# number of blocks&amp;#10;numPractice = 1 # will be multiplied by 2&amp;#10;# number of practice reps&amp;#10;numJawReps = 10 &amp;#10;numJawBlocks = 3" valType="extendedCode" updates="constant" name="Before Experiment"/>
+        <Param val="numReps = 4;&amp;#10;numBlocks = 4;&amp;#10;numPractice = 1;&amp;#10;numJawReps = 10;&amp;#10;numJawBlocks = 3;&amp;#10;" valType="extendedCode" updates="constant" name="Before JS Experiment"/>
         <Param val="" valType="extendedCode" updates="constant" name="Begin Experiment"/>
         <Param val="" valType="extendedCode" updates="constant" name="Begin JS Experiment"/>
         <Param val="" valType="extendedCode" updates="constant" name="Begin JS Routine"/>

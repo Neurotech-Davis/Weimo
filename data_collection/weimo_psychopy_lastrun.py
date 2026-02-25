@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 This experiment was created using PsychoPy3 Experiment Builder (v2024.2.4),
-    on February 12, 2026, at 19:35
+    on February 24, 2026, at 19:35
 If you publish work using this script the most relevant publication is:
 
     Peirce J, Gray JR, Simpson S, MacAskill M, Höchenberger R, Sogo H, Kastman E, Lindeløv JK. (2019) 
@@ -34,13 +34,13 @@ import psychopy.iohub as io
 from psychopy.hardware import keyboard
 
 # Run 'Before Experiment' code from set_params
-numReps = 1 # will be multiplied by 6
+numReps = 0 # will be multiplied by 6
 # number of loops per block
-numBlocks = 2
+numBlocks = 0
 # number of blocks
-numPractice = 1 # will be multiplied by 2
+numPractice = 0 # will be multiplied by 2
 # number of practice reps
-numJawReps = 2 
+numJawReps = 12 
 numJawBlocks = 2
 # --- Setup global variables (available in all functions) ---
 # create a device manager to handle hardware (keyboards, mice, mirophones, speakers, etc.)
