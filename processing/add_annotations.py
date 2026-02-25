@@ -169,9 +169,9 @@ def main():
     '''
     # run from weimo
     # should be named "namedate(month then day).fif"
-    psychopy_folder = './data_collection/data'
-    eeg_folder = './data_collection/eeg_data'
-    annotated_eeg_folder = './data_collection/annotated_eeg'
+    psychopy_folder = 'data_collection\psychopy_data'
+    eeg_folder = 'data_collection\eeg_data'
+    annotated_eeg_folder = 'data_collection\annotated_eeg'
 
     # for each eeg + psychopy pair
     pairs = get_pairs(psychopy_folder, eeg_folder)
