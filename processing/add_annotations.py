@@ -76,6 +76,18 @@ def get_psycho_time(df):
     start = datetime.strptime(start_time, '%Y-%m-%d %Hh%M.%S.%f %z').time()
     return start
 
+def clean_time_values(values):
+    
+    '''
+    clean up data to ensure only numbers are counted
+    '''
+    
+    cleaned = []
+    for x in values:
+        if isinstance(x, (int, float)) and not math.isnan(x):
+            cleaned.append(float(x))
+    return cleaned
+
 def annotate(pairs, output_folder, eeg_folder, psychopy_folder):
     '''
     input: list of pairs of files
@@ -104,6 +116,14 @@ def annotate(pairs, output_folder, eeg_folder, psychopy_folder):
         movement_times = df['go_txt.started'].tolist()
         clean_move_times = [x for x in movement_times if not math.isnan(x)]
 
+        jaw_time = []
+        if 'jaw_txt.started' in df.columns:
+            jaw_clench = df['jaw_txt.started'].tolist()
+            clean_jaw = clean_time_values(jaw_clench)
+            #make sure to change label to correct one once integrated 
+        else:
+            clean_jaw = []
+
         # get difference of times, eeg will always start sooner
         diff = datetime.combine(date.min, psychopy_time) - datetime.combine(date.min, eeg_time)
         seconds_diff = diff.total_seconds()
@@ -113,14 +133,29 @@ def annotate(pairs, output_folder, eeg_folder, psychopy_folder):
         move_durations = [4.0] * len(move_onsets)
         move_desc = ['move'] * len(move_onsets)
 
-        # replicate this with jaw clenches at concatenate them
-        onsets = move_onsets
-        durations = move_durations
-        descriptions = move_desc
+        jaw_onset = [x + seconds_diff for x in clean_jaw]
+        jaw_duration = [1.0] * len(jaw_onset) #change time according to how long jaw clench is 
+        jaw_desc = ['jaw_clench'] * len(jaw_onset)
+
+        #combine move and jaw onsets 
+        onsets = move_onsets + jaw_onset
+        durations = move_durations + jaw_duration
+        descriptions = move_desc + jaw_desc
+
+        
 
         # set annotations
         annotation = mne.Annotations(onset=onsets, duration=durations, description=descriptions)
         raw.set_annotations(annotation)
+        '''
+        if raw.annotations is not None and len(raw.annotations) > 0:
+            raw.set_annotations(raw.annotations + annotation)
+        else:
+            raw.set_annotations(annotation)
+        '''
+        #labeling the events in the raw data 
+        events, event_id = mne.events_from_annotations(raw)
+        print(f"[INFO] {eeg_file}: event_id={event_id}, #_events={len(events)}")
 
         # save
         raw.save(f'{output_folder}/{eeg_file}.fif', overwrite=True)
@@ -133,6 +168,7 @@ def main():
     add annotations for corresponding eeg and psychopy files at the right times
     '''
     # run from weimo
+    # should be named "namedate(month then day).fif"
     psychopy_folder = './data_collection/data'
     eeg_folder = './data_collection/eeg_data'
     annotated_eeg_folder = './data_collection/annotated_eeg'
