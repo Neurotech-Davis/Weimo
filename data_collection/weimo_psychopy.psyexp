@@ -706,7 +706,7 @@
     </LoopInitiator>
     <LoopInitiator loopType="TrialHandler" name="trials">
       <Param name="Selected rows" updates="None" val="" valType="str"/>
-      <Param name="conditions" updates="None" val="[{'thisClip': 'videos/walking1.mp4'}, {'thisClip': 'videos/walking2.mp4'}, {'thisClip': 'videos/walking3.mp4'}, {'thisClip': 'videos/walking4.mp4'}, {'thisClip': 'videos/walking5.mp4'}, {'thisClip': 'videos/walking6.mp4'}]" valType="str"/>
+      <Param name="conditions" updates="None" val="[{'thisClip': 'videos/walking1.mp4', 'thisClipPrac': 'videos/walking1.mp4'}, {'thisClip': 'videos/walking2.mp4', 'thisClipPrac': 'videos/walking2.mp4'}, {'thisClip': 'videos/walking3.mp4', 'thisClipPrac': None}, {'thisClip': 'videos/walking4.mp4', 'thisClipPrac': None}, {'thisClip': 'videos/walking5.mp4', 'thisClipPrac': None}, {'thisClip': 'videos/walking6.mp4', 'thisClipPrac': None}]" valType="str"/>
       <Param name="conditionsFile" updates="None" val="stimuli_sheet.xlsx" valType="file"/>
       <Param name="endPoints" updates="None" val="[0, 1]" valType="num"/>
       <Param name="isTrials" updates="None" val="True" valType="bool"/>

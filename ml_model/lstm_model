@@ -1,40 +1,41 @@
-
-
-
-
 #detail what intent to move means
 
 import os
 
 # automatically grab your total logical CPU count
 n_cores = os.cpu_count()  # e.g. 8
-
 os.environ["LOKY_MAX_CPU_COUNT"] = str(n_cores)
 
 # import functions from preprocessing
 import sys
-sys.path.insert(0, "../pre_processing/")
+sys.path.insert(0, "C:\Users\akim0\weimo\Weimo\processing\preprocess.py")
 
 # standard libraries
 import numpy as np
 import pandas as pd
 import csv
-import mne 
-import json
 
-# model libraries
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+from torch.utils.data import TensorDataset, DataLoader
+from sklearn.model_selection import train_test_split
+
+from sklearn.utils import shuffle
+from sklearn.preprocessing import StandardScaler  
 
 # our own preprocessing script
-import pre_processing_scripts_v2 as pp
+import (preprocessing file****) as pp
 from itertools import product
+
 
 #region paths
 # set paths
-chengyi_eeg_file_path_edf = '../data_collection/eeg_data/chengyi0224.edf'
-chengyi_psychopy_file_path_csv = '../data_collection/psychopy_data/chengyi0224.csv' 
+chengyi_eeg_file_path_edf = '../data_collection/eeg_data/chengyi0210.edf'
+chengyi_psychopy_file_path_csv = '../data_collection/psychopy_data/chengyi0210.csv' 
+
+pilapil_eeg_file_path_edf = '../data_collection/eeg_data/pilapil0226.edf'
+pilapil_psychopy_file_path_csv = '../data_collection/psychopy_data/pilapil0226.csv'
 
 #endregion
 
