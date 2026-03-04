@@ -91,7 +91,7 @@ def clean_time_values(values):
 def annotate(pairs, output_folder, eeg_folder, psychopy_folder):
     '''
     input: list of pairs of files
-    output: edf files that now have event event codes
+    output: fif files that now have event event codes
     '''
 
     for pair in pairs:
@@ -142,8 +142,6 @@ def annotate(pairs, output_folder, eeg_folder, psychopy_folder):
         durations = move_durations + jaw_duration
         descriptions = move_desc + jaw_desc
 
-        
-
         # set annotations
         annotation = mne.Annotations(onset=onsets, duration=durations, description=descriptions)
         raw.set_annotations(annotation)
@@ -156,11 +154,10 @@ def annotate(pairs, output_folder, eeg_folder, psychopy_folder):
         #labeling the events in the raw data 
         events, event_id = mne.events_from_annotations(raw)
         print(f"[INFO] {eeg_file}: event_id={event_id}, #_events={len(events)}")
+        eeg_file = eeg_file[:-4] # removes the .edf suffix
 
         # save
         raw.save(f'{output_folder}/{eeg_file}.fif', overwrite=True)
-
-
 
 
 def main():
@@ -169,19 +166,19 @@ def main():
     '''
     # run from weimo
     # should be named "namedate(month then day).fif"
-    psychopy_folder = 'data_collection\psychopy_data'
-    eeg_folder = 'data_collection\eeg_data'
-    annotated_eeg_folder = 'data_collection\annotated_eeg'
+    psychopy_folder = './data_collection/data' 
+    eeg_folder = './data_collection/eeg_data'
+    annotated_eeg_folder = './data_collection/annotated_eeg'
 
     # for each eeg + psychopy pair
     pairs = get_pairs(psychopy_folder, eeg_folder)
     print(pairs)
 
     # get the time of each MI cue
-    annotate(pairs=pairs, output_folder=annotated_eeg_folder, eeg_folder=eeg_folder, psychopy_folder=psychopy_folder)
-
-    # add an event for each of these cues in the EEG file
+    annotate(pairs=pairs, output_folder=annotated_eeg_folder, 
+             eeg_folder=eeg_folder, psychopy_folder=psychopy_folder)
 
 
 if __name__ == "__main__":
     main()
+    
