@@ -3,7 +3,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mne.decoding import CSP
 from sklearn.decomposition import PCA
-from mne.decoding import UnsupervisedSpatialFilter
 import os
 import json
 
@@ -21,17 +20,6 @@ def notch(freq: float = 60.0):
 
 
 def bandpass(bands: list[tuple]):
-    """Bandpass filter into one or more frequency bands.
-
-    Stores filtered copies keyed by (low, high) on the raw object so that
-    downstream feature extractors can access each band separately.
-
-    Parameters
-    ----------
-    bands : list of (low_cut, high_cut) tuples
-        e.g. [(8, 13), (13, 30)] for alpha + beta
-        e.g. [(4, 100)] for a single wide pass
-    """
     def apply(raw: mne.io.Raw) -> mne.io.Raw:
         raw._band_data = {}
         for low_cut, high_cut in bands:
@@ -44,7 +32,6 @@ def bandpass(bands: list[tuple]):
 
 
 def rereference(ref: str = "average"):
-    """Re-reference to common average or a named channel."""
     def apply(raw: mne.io.Raw) -> mne.io.Raw:
         raw.set_eeg_reference(ref_channels=ref, projection=False)
         return raw
@@ -54,11 +41,6 @@ def rereference(ref: str = "average"):
 
 def epoch(tmin: float = 0.0, tmax: float = 3.0,
           baseline: tuple = None, event_id: dict = None):
-    """Epoch the continuous data around annotation onsets.
-
-    Stores the resulting Epochs object as raw._epochs so feature extractors
-    can access it.
-    """
     def apply(raw: mne.io.Raw) -> mne.io.Raw:
         events_array, event_id_dict = mne.events_from_annotations(raw)
         selected_ids = event_id if event_id is not None else event_id_dict
@@ -69,14 +51,62 @@ def epoch(tmin: float = 0.0, tmax: float = 3.0,
             baseline=baseline,
             preload=True
         )
+        raw._event_id = selected_ids  # store for remapping later
         print(f"Epoched: {len(raw._epochs)} trials  |  classes: {list(selected_ids.keys())}")
         return raw
     apply.__repr__ = lambda: f"epoch(tmin={tmin}, tmax={tmax})"
     return apply
 
 
+def add_idle_class(window_dur: float = 3.0, idle_start_min: float = 1.0, label: str = 'idle'):
+    """Add idle-class annotations from unannotated time after idle_start_min minutes.
+
+    Must be added to the pipeline BEFORE epoch().
+    """
+    def apply(raw: mne.io.Raw) -> mne.io.Raw:
+        idle_start_sec = idle_start_min * 60.0
+        recording_end_sec = raw.times[-1]
+
+        # build busy intervals from existing annotations, padded by window_dur
+        busy_intervals = [
+            (ann['onset'], ann['onset'] + ann['duration'] + window_dur)
+            for ann in raw.annotations
+        ]
+
+        # walk through recording and collect non-overlapping idle windows
+        idle_onsets = []
+        t = idle_start_sec
+        while t + window_dur <= recording_end_sec:
+            window_end = t + window_dur
+            overlaps = any(
+                not (window_end <= busy_start or t >= busy_end)
+                for busy_start, busy_end in busy_intervals
+            )
+            if not overlaps:
+                idle_onsets.append(t)
+                t += window_dur
+            else:
+                t += 0.1
+
+        if not idle_onsets:
+            print(f"[idle] Warning: no idle windows found after {idle_start_min} min")
+            return raw
+
+        idle_annotations = mne.Annotations(
+            onset=np.array(idle_onsets),
+            duration=np.full(len(idle_onsets), window_dur),
+            description=np.array([label] * len(idle_onsets)),
+            orig_time=raw.annotations.orig_time,
+        )
+        raw.set_annotations(raw.annotations + idle_annotations)
+        print(f"[idle] Added {len(idle_onsets)} idle windows  |  label: '{label}'")
+        return raw
+
+    apply.__repr__ = lambda: f"add_idle_class(window_dur={window_dur}, idle_start_min={idle_start_min})"
+    return apply
+
+
 def plot_psd(title: str = "PSD", fmin: float = 0.1, fmax: float = 150.0):
-    """Passthrough step that plots the PSD at this point in the pipeline."""
     def apply(raw: mne.io.Raw) -> mne.io.Raw:
         eeg_channels = [ch for ch in raw.ch_names if "EEG" in ch]
         psd, freqs = mne.time_frequency.psd_array_welch(
@@ -107,11 +137,6 @@ def _get_eeg_channels(raw):
 
 
 def extract_csp(n_components: int = 6):
-    """CSP log-variance features → CSP + LDA.
-
-    If bandpass() was called with multiple bands, fits a separate CSP per band
-    and concatenates — giving (n_trials, n_bands * n_components).
-    """
     def extract(raw: mne.io.Raw):
         assert hasattr(raw, '_epochs'), "Add epoch() to the pipeline before extracting features."
         eeg_channels = _get_eeg_channels(raw)
@@ -144,15 +169,10 @@ def extract_csp(n_components: int = 6):
 
 
 def extract_tensor(scale: bool = True):
-    """Raw epoch tensor → all DL models (EEGNet / ATCNet / CTNet / Conformer).
-
-    Output shape: (n_trials, 1, n_channels, n_times) — float32.
-    The leading 1 is the image-channel dimension expected by 2D convolutions.
-    """
     def extract(raw: mne.io.Raw):
         assert hasattr(raw, '_epochs'), "Add epoch() to the pipeline before extracting features."
         eeg_channels = _get_eeg_channels(raw)
-        X = raw._epochs.get_data(picks=eeg_channels)  # (n_trials, n_ch, n_times)
+        X = raw._epochs.get_data(picks=eeg_channels)
         y = raw._epochs.events[:, 2]
         if scale:
             mean = X.mean(axis=-1, keepdims=True)
@@ -170,20 +190,13 @@ def extract_cwt(freqs: np.ndarray = None, n_cycles: float = 6.0):
         assert hasattr(raw, '_epochs'), "Add epoch() to the pipeline before extracting features."
         eeg_channels = _get_eeg_channels(raw)
         _freqs = freqs if freqs is not None else np.arange(1, 101, 1.0)
-        raw_X = raw._epochs.get_data(picks=eeg_channels)  # (n_trials, n_ch, n_times)
+        raw_X = raw._epochs.get_data(picks=eeg_channels)
         y = raw._epochs.events[:, 2]
         sfreq = raw.info['sfreq']
-
-        # mne.time_frequency.tfr_array_morlet expects (n_trials, n_ch, n_times)
-        # returns (n_trials, n_ch, n_freqs, n_times)
         X_cwt = mne.time_frequency.tfr_array_morlet(
-            raw_X,
-            sfreq=sfreq,
-            freqs=_freqs,
-            n_cycles=n_cycles,
-            output='power'
+            raw_X, sfreq=sfreq, freqs=_freqs,
+            n_cycles=n_cycles, output='power'
         ).astype(np.float32)
-
         print(f"[CWT] shape: {X_cwt.shape}")
         return X_cwt, y
     extract.__repr__ = lambda: f"extract_cwt(n_cycles={n_cycles})"
@@ -191,10 +204,6 @@ def extract_cwt(freqs: np.ndarray = None, n_cycles: float = 6.0):
 
 
 def extract_bandpower(bands: dict = None):
-    """Per-band log power → lightweight spectral baseline.
-
-    Output shape: (n_trials, n_channels * n_bands) — float32.
-    """
     _bands = bands or {
         'theta': (4,  8),
         'alpha': (8,  13),
@@ -227,115 +236,60 @@ def extract_bandpower(bands: dict = None):
     extract.__repr__ = lambda: f"extract_bandpower(bands={list(_bands.keys())})"
     return extract
 
+def extract_pca(n_components: int = 10):
+    """PCA dimensionality reduction on epoch tensor.
+
+    Output shape: (n_trials, n_components) — float32.
+    """
+    def extract(raw: mne.io.Raw):
+        assert hasattr(raw, '_epochs'), "Add epoch() to the pipeline before extracting features."
+        eeg_channels = _get_eeg_channels(raw)
+        X = raw._epochs.get_data(picks=eeg_channels)  # (n_trials, n_ch, n_times)
+        y = raw._epochs.events[:, 2]
+
+        # flatten each trial to a 1D vector before PCA
+        n_trials = X.shape[0]
+        X_flat = X.reshape(n_trials, -1)  # (n_trials, n_ch * n_times)
+
+        pca = PCA(n_components=n_components)
+        X_pca = pca.fit_transform(X_flat).astype(np.float32)
+
+        explained = pca.explained_variance_ratio_.sum()
+        print(f"[PCA] shape: {X_pca.shape}  |  variance explained: {explained:.2%}")
+        return X_pca, y
+
+    extract.__repr__ = lambda: f"extract_pca(n_components={n_components})"
+    return extract
 
 # =============================================================================
 # Pipeline
 # =============================================================================
 
 class MNEPipeline:
-    """Composable EEG preprocessing pipeline.
-
-    Steps are callables (Raw -> Raw) added via .add(). They execute in order
-    when .run() is called. Feature extraction happens at the end via a separate
-    extractor callable (Raw -> (X, y)).
-
-    Example
-    -------
-    pipeline = MNEPipeline('subject01.fif')
-    pipeline.add(notch(60))
-    pipeline.add(bandpass([(8, 13), (13, 30)]))
-    pipeline.add(rereference())
-    pipeline.add(epoch(tmin=0, tmax=3))
-    X, y = pipeline.run(extract_csp(n_components=6))
-    """
-
     def __init__(self, fif_file: str):
         self.fif_file = fif_file
         self.steps = []
 
     def add(self, step) -> 'MNEPipeline':
-        """Add a preprocessing step. Returns self for optional chaining."""
         self.steps.append(step)
         return self
 
     def describe(self):
-        """Print the current pipeline steps in order."""
         print(f"Pipeline: {self.fif_file}")
         for i, step in enumerate(self.steps):
             print(f"  {i+1}. {repr(step)}")
 
     def run(self, extractor=None):
-        """Execute all steps in order, then optionally extract features.
-
-        Parameters
-        ----------
-        extractor : callable (Raw -> (X, y)), optional
-            One of: extract_csp(), extract_tensor(), extract_cwt(),
-            extract_bandpower(). If None, returns the processed Raw object.
-
-        Returns
-        -------
-        (X, y) if extractor is provided, else processed mne.io.Raw
-        """
         raw = mne.io.read_raw_fif(self.fif_file, preload=True)
-
         for step in self.steps:
             print(f"Applying: {repr(step)}")
-            raw = step(raw) # step IS apply
-
+            raw = step(raw)
         if extractor is not None:
             return extractor(raw)
         return raw
-    
-    def to_dict(self):                  # now correctly inside the class
-        return {
-            'steps': [repr(s) for s in self.steps],
-            'extractor': repr(self._extractor),
-        }
 
-
-# =============================================================================
-# Named presets — ready-to-use pipelines per paradigm
-# =============================================================================
-
-def preset_csp_lda(fif_file: str):
-    """CSP + LDA — narrow µ/β bandpass, CSP features."""
-    return (MNEPipeline(fif_file)
-            .add(notch(60))
-            .add(bandpass([(8, 30)]))
-            .add(rereference())
-            .add(epoch(tmin=0, tmax=3))
-            .run(extract_csp(n_components=6)))
-
-
-def preset_csp_lda_multiband(fif_file: str):
-    """CSP + LDA — separate alpha and beta bands, concatenated CSP features."""
-    return (MNEPipeline(fif_file)
-            .add(notch(60))
-            .add(bandpass([(8, 13), (13, 30)]))
-            .add(rereference())
-            .add(epoch(tmin=0, tmax=3))
-            .run(extract_csp(n_components=6)))
-
-
-def preset_deep_learning(fif_file: str):
-    """EEGNet / ATCNet / CTNet / Conformer — wide bandpass, raw tensor."""
-    return (MNEPipeline(fif_file)
-            .add(notch(60))
-            .add(bandpass([(4, 100)]))
-            .add(rereference())
-            .add(epoch(tmin=0, tmax=3))
-            .run(extract_tensor(scale=True)))
-
-
-def preset_cwt_hybrid(fif_file: str):
-    """EMD+CWT+ADBN style — wide bandpass, CWT scalogram."""
-    return (MNEPipeline(fif_file)
-            .add(notch(60))
-            .add(bandpass([(4, 100)]))
-            .add(rereference())
-            .add(epoch(tmin=0, tmax=3))
-            .run(extract_cwt(freqs=np.arange(1, 101, 1.0))))
+    def to_dict(self):
+        return {'steps': [repr(s) for s in self.steps]}
 
 
 # =============================================================================
@@ -343,55 +297,51 @@ def preset_cwt_hybrid(fif_file: str):
 # =============================================================================
 
 if __name__ == "__main__":
-    EVENT_ID = {
-    'move':       1,
-    'jaw_clench': 2,
-    }
-
-    # process multiple files
     files = [
         './data_collection/annotated_eeg/chengyi0210.fif',
         './data_collection/annotated_eeg/pilapil0226.fif',
     ]
     save_dir = ''
+    label_map = {'idle': 0, 'move': 1, 'jaw_clench': 2}
 
     all_X, all_y = [], []
 
     for file in files:
-        # -- Option A: use a preset
-        X, y = preset_deep_learning(file)
-        print(X.shape, np.unique(y))
-
-        # -- Option B: build a custom pipeline
         pipeline = MNEPipeline(file)
         pipeline.add(notch(60))
-        pipeline.add(plot_psd("Raw"))          # inspect before filtering
         pipeline.add(bandpass([(8, 13), (13, 30)]))
-        pipeline.add(plot_psd("After filter")) # inspect after
         pipeline.add(rereference())
-        pipeline.add(epoch(tmin=0, tmax=3, event_id=EVENT_ID))
+        pipeline.add(add_idle_class(window_dur=3.0, idle_start_min=1.0))
+        pipeline.add(epoch(tmin=0, tmax=3))
         pipeline.describe()
-        X, y = pipeline.run(extract_csp(n_components=6))
-        print(X.shape, np.unique(y))
 
+        # run without extractor to keep the raw object (for event_id access)
+        raw_processed = pipeline.run()
+        X, y = extract_csp(n_components=6)(raw_processed)
+
+        # remap MNE's auto-assigned ids to consistent 0/1/2 labels
+        auto_ids = raw_processed._event_id  # e.g. {'idle': 1, 'jaw_clench': 2, 'move': 3}
+        remap = {v: label_map[k] for k, v in auto_ids.items() if k in label_map}
+        y = np.array([remap[yi] for yi in y])
+
+        print(X.shape, np.unique(y))
         all_X.append(X)
         all_y.append(y)
-    
-    X = np.concatenate(all_X, axis=0) 
-    y = np.concatenate(all_y, axis=0)
 
-    # save it 
+    X = np.concatenate(all_X, axis=0)
+    y = np.concatenate(all_y, axis=0)
+    print(f"Total: {X.shape}, labels: {np.unique(y)}")
+
     save_path = os.path.join(save_dir, 'dataset.npz') if save_dir else 'dataset.npz'
     np.savez(save_path, X=X, y=y)
     print(f"Saved {X.shape[0]} trials to {save_path}")
 
-    # save config
     config = {
         'files': files,
-        'event_id': EVENT_ID,
-        'pipeline': pipeline.to_dict()['steps'],  # steps are the same for all files
+        'label_map': label_map,
         'X_shape': list(X.shape),
         'y_shape': list(y.shape),
+        'pipeline': pipeline.to_dict()['steps'],
     }
     config_path = save_path.replace('.npz', '_config.json')
     with open(config_path, 'w') as f:
