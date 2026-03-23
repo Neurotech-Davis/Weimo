@@ -1,0 +1,196 @@
+import torch
+import torch.nn as nn
+
+n_channels = 10
+n_classes = 2
+
+'''
+1. Classical Baseline: CSP + LDA
+Architecture: Common Spatial Patterns (CSP) for spatial filtering on µ/β frequency bands, followed by Linear Discriminant Analysis (LDA) for classification. No deep learning.
+This remains a widespread approach: CSP extracts task-discriminative spatial features, which are then passed to LDA for classification. Frontiers It serves as the floor baseline against which all deep learning models are compared. Typical 4-class accuracy on BCI IV-2a hovers around 65–70%.
+'''
+
+'''
+2. ShallowConvNet & DeepConvNet — Schirrmeister et al. (2017)
+Preprocessing: None basically
+Source: EEG Deep Learning (Neural Computation, 2017)
+Architecture (ShallowConvNet): Two convolutional layers — a temporal convolution followed by a spatial convolution — with a mean-pooling layer and log-variance activation. Designed to approximate band-power features from the µ/β range.
+Architecture (DeepConvNet): A deeper stack of 4 convolutional blocks (Conv → BatchNorm → ELU → MaxPool), trading interpretability for capacity.
+ShallowConvNet and DeepConvNet were among the first architectures to decode MI tasks from raw EEG signals end-to-end, though DeepConvNet's large parameter count made it harder to interpret. Springer
+Results on BCI IV-2a (4-class): ShallowConvNet ~75–76% accuracy; DeepConvNet slightly lower due to overfitting in small-data regimes. CTNet surpassed ShallowConvNet by 6.83% on BCI IV-2a, contextualizing its competitive standing. PubMed Central
+'''
+
+class DeepConvNet(nn.Module):
+    def __init__(self):
+        super(DeepConvNet, self).__init__()
+
+        self.max_pool = nn.MaxPool2d(kernel_size=(1,3), stride=(1,3))
+        
+        # block 1
+        self.temporal_conv = nn.Conv2d(1, 25, kernel_size=(1,10))
+        self.spatial_conv = nn.Sequential(
+            nn.Conv2d(25, 25, kernel_size=(n_channels, 1)),
+            nn.BatchNorm2d(25),
+            nn.ELU(inplace=True),
+        )
+
+        # block 2
+        self.block2_conv = nn.Sequential(
+            nn.Conv2d(25, 50, kernel_size=(1,10)),
+            nn.BatchNorm2d(50),
+            nn.ELU(inplace=True),
+        )
+        # block 3
+        self.block3_conv = nn.Sequential(
+            nn.Conv2d(50, 100, kernel_size=(1,10)),
+            nn.BatchNorm2d(100),
+            nn.ELU(inplace=True),
+        )
+        # block 4
+        self.block4_conv = nn.Sequential(
+            nn.Conv2d(100, 200, kernel_size=(1,10)),
+            nn.BatchNorm2d(200),
+            nn.ELU(inplace=True),
+        )
+        # classification
+        self.classifier = nn.Sequential(
+            nn.AdaptiveAvgPool2d((1, 1)),  # collapses to (batch, 200, 1, 1)
+            nn.Flatten(),                  # → (batch, 200)
+            nn.Linear(200, n_classes),
+            nn.Softmax(dim=1),
+        )
+                
+    def forward(self, x):
+        # block 1
+        x = self.temporal_conv(x)
+        x = self.spatial_conv(x)
+        x = self.max_pool(x)
+
+        # blocks 2-4
+        x = self.block2_conv(x)
+        x = self.max_pool(x)
+        x = self.block3_conv(x)
+        x = self.max_pool(x)
+        x = self.block4_conv(x)
+        x = self.max_pool(x)
+
+        # output
+        x = self.classifier(x)
+        return x
+    
+class ShallowConvNet(nn.Module):
+    def __init__(self, n_channels=22, n_classes=4):
+        super(ShallowConvNet, self).__init__()
+
+        self.temporal_conv = nn.Conv2d(1, 40, kernel_size=(1, 25))
+        self.spatial_conv = nn.Sequential(
+            nn.Conv2d(40, 40, kernel_size=(n_channels, 1), bias=False),
+            nn.BatchNorm2d(40),
+        )
+
+        # squaring + avg pool + log — the FBCSP-equivalent nonlinearity
+        self.avg_pool = nn.AvgPool2d(kernel_size=(1, 75), stride=(1, 15))
+
+        self.classifier = nn.Sequential(
+            nn.AdaptiveAvgPool2d((1, 1)),  # collapses to (batch, 40, 1, 1)
+            nn.Flatten(),                  # → (batch, 40)
+            nn.Linear(40, n_classes),
+            nn.Softmax(dim=1),
+        )
+
+    def forward(self, x):
+        x = self.temporal_conv(x)
+        x = self.spatial_conv(x)
+        x = x ** 2                  # squaring nonlinearity
+        x = self.avg_pool(x)
+        x = torch.log(x.clamp(min=1e-6))  # log activation, clamped for stability
+        x = self.classifier(x)
+        return x
+
+
+'''
+3. EEGNet — Lawhern et al. (2018)
+Source: Journal of Neural Engineering, 15(5):056013
+Architecture: Three-block compact CNN:
+
+Block 1: 2D temporal convolution (captures frequency-specific filters)
+Block 2: Depthwise convolution (learns spatial filters per temporal feature map) + BatchNorm + ELU + Average pooling
+Block 3: Separable convolution (summarizes temporal features per depthwise filter) + BatchNorm + ELU + Average pooling + Dropout → Softmax
+
+EEGNet uses one-dimensional and deep convolutional layers for real-time feature extraction, enabling training on limited datasets while achieving competitive decoding accuracy. Frontiers Two standard configurations exist: EEGNet-4,2 and EEGNet-8,2 (F1 filters, D depth multiplier).
+Results on BCI IV-2a: ~73–76% (subject-specific). EEGNet-4,2 and EEGNet-8,2 achieve very competitive classification performance on both datasets and are highly compact. ScienceDirect
+Why it matters: EEGNet is the de facto lightweight baseline in the field — nearly every subsequent paper benchmarks against it.
+'''
+
+'''
+4. ATCNet — Altaheri et al. (2022)
+Source: IEEE Transactions on Neural Systems and Rehabilitation Engineering
+Architecture: Three sequential modules:
+
+Convolutional module (EEGNet-style): Temporal + depthwise + separable convolutions for local spatial-spectral feature extraction
+Attention block: Multi-head self-attention (MSA) applied to the convolutional output to emphasize the most task-relevant temporal segments
+TCN block: Temporal Convolutional Network with dilated causal convolutions and residual connections for high-level temporal feature extraction
+
+Additionally uses a sliding window augmentation strategy at the convolutional module output to increase effective training data.
+ATCNet integrates attention mechanisms with TCN and CNN architectures — the attention block applies multi-head self-attention to identify key features, while the TCN block extracts advanced temporal features. Frontiers
+Results on BCI IV-2a: ~85–87% (subject-specific). ATCNet represents one of the most advanced currently available approaches combining attention mechanisms with temporal convolutional networks for MI-EEG decoding. arXiv
+'''
+
+'''
+5. EEG Conformer — Song et al. (2022/2023)
+- Source: IEEE Transactions on Neural Systems and Rehabilitation Engineering
+- Architecture: Hybrid CNN + Transformer:
+- Convolution module (ShallowConvNet-based): Temporal convolution → spatial depthwise convolution → average pooling; extracts local temporal-spatial features
+- Self-attention (Transformer encoder) module: Projects convolutional features into a sequence, applies multi-head self-attention with positional encoding to model global temporal dependencies
+- Classification module: Fully connected layer → Softmax
+- BCI IV-2a: 78.66%
+- BCI IV-2b: 84.63%
+- SEED (emotion): 95.30%
+'''
+
+'''
+6. CTNet — Zhao et al. (2024)
+Source: Scientific Reports 14, 20237 (2024). Link
+Architecture: CNN (improved EEGNet) + Transformer encoder:
+
+Convolutional module: Modified EEGNet with temporal and depthwise spatial convolutions; outputs local feature representations
+Transformer encoder: Multi-head self-attention over the convolutional features to extract global temporal correlations
+Classifier: FC → Softmax
+
+Key design goal: fewer trainable parameters than EEG Conformer, reducing overfitting.
+In subject-specific experiments on BCI IV-2a, CTNet achieved an average accuracy of 82.52%, with the lowest standard deviation of 9.61% and a Kappa score of 0.7670 among evaluated models — indicating strong consistency across subjects. PubMed Central
+Results:
+
+BCI IV-2a (subject-specific): 82.52% (Kappa: 0.7670)
+Outperforms EEG Conformer by 4.86% and DeepConvNet by 4.74%
+'''
+
+
+'''
+7. MBMANet — Deng et al. (2024)
+Architecture: Tri-branch structure combining parallel multi-head attention with Squeeze-and-Excitation (SE) blocks, Convolutional Block Attention Module (CBAM), EEGNet, and TCN. The branches run in parallel and are concatenated before classification.
+MBMANet's tri-branch architecture combines parallel multi-head attention with SE and CBAM alongside EEGNet and TCN for MI-EEG classification. PubMed Central
+Results on BCI IV-2a: 83.18% — a 3.43% improvement over prior models at time of publication.
+'''
+
+
+'''
+8. EMD+CWT+SPoC+CSP+ADBN — Mathiyazhagan & Devasena (2025)
+Source: Scientific Reports / PubMed (2025). Link
+Architecture: Fully hybrid classical + deep pipeline:
+
+Preprocessing: EMD (Empirical Mode Decomposition) for intrinsic signal mode extraction + CWT (Continuous Wavelet Transform) for multi-resolution analysis
+Spatial feature enhancement: Source Power Coherence (SPoC) + Common Spatial Patterns (CSP)
+Classifier: Adaptive Deep Belief Network (ADBN) with parameters optimized via Far and Near Optimization (FNO) algorithm
+
+On the BCI IV Dataset 2a, this approach achieves 95.7% accuracy, 96.2% recall, 95.9% precision, and 97.5% specificity; on PhysioNet it yields 94.1% accuracy, 94.0% recall, 93.6% precision, and 95.0% specificity. Nature
+⚠️ Caveat: These very high numbers (95.7%) should be interpreted cautiously. They are from a single paper not yet broadly replicated, and the complexity of the preprocessing pipeline may limit real-world generalizability and real-time use. The BCI IV-2a community consensus sits closer to 80–87% for well-validated models.
+'''
+
+'''
+9. Transformer-Based Model — Scientific Reports (2023)
+Source: Scientific Reports (2023). Link
+Architecture: Pure transformer network operating on raw EEG time series, without a CNN front-end. Uses multi-head self-attention over temporal windows with positional encoding.
+This transformer-based architecture achieves 99.7% accuracy on the binary-class BCI III IVa dataset and 84% on the 4-class BCI IV-2a dataset. Nature
+Note: The 99.7% figure is on a binary classification task (2-class, small dataset), which inflates performance vs. 4-class benchmarks.
+'''
