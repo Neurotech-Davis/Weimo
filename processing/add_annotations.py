@@ -152,7 +152,11 @@ def annotate(pairs, output_folder, eeg_folder, psychopy_folder):
             raw.set_annotations(annotation)
         '''
         #labeling the events in the raw data 
-        events, event_id = mne.events_from_annotations(raw)
+        EVENT_ID = {
+            'move':       1,
+            'jaw_clench': 2,
+        }
+        events, event_id = mne.events_from_annotations(raw, event_id=EVENT_ID)
         print(f"[INFO] {eeg_file}: event_id={event_id}, #_events={len(events)}")
         eeg_file = eeg_file[:-4] # removes the .edf suffix
 
