@@ -4,7 +4,8 @@ import matplotlib.pyplot as plt
 from mne.decoding import CSP
 from sklearn.decomposition import PCA
 from mne.decoding import UnsupervisedSpatialFilter
-
+import os
+import json
 
 # =============================================================================
 # Preprocessing steps — each is a factory that returns a (Raw -> Raw) callable
@@ -138,6 +139,7 @@ def extract_csp(n_components: int = 6):
 
         print(f"[CSP] shape: {X.shape}")
         return X, y
+    extract.__repr__ = lambda: f"extract_csp(n_components={n_components})"
     return extract
 
 
@@ -159,6 +161,7 @@ def extract_tensor(scale: bool = True):
         X = X[:, np.newaxis, :, :].astype(np.float32)
         print(f"[Tensor] shape: {X.shape}")
         return X, y
+    extract.__repr__ = lambda: f"extract_tensor(scale={scale})"
     return extract
 
 
@@ -183,6 +186,7 @@ def extract_cwt(freqs: np.ndarray = None, n_cycles: float = 6.0):
 
         print(f"[CWT] shape: {X_cwt.shape}")
         return X_cwt, y
+    extract.__repr__ = lambda: f"extract_cwt(n_cycles={n_cycles})"
     return extract
 
 
@@ -220,6 +224,7 @@ def extract_bandpower(bands: dict = None):
         X = np.array(features, dtype=np.float32)
         print(f"[Bandpower] shape: {X.shape}  bands: {list(_bands.keys())}")
         return X, y
+    extract.__repr__ = lambda: f"extract_bandpower(bands={list(_bands.keys())})"
     return extract
 
 
@@ -281,6 +286,12 @@ class MNEPipeline:
         if extractor is not None:
             return extractor(raw)
         return raw
+    
+    def to_dict(self):                  # now correctly inside the class
+        return {
+            'steps': [repr(s) for s in self.steps],
+            'extractor': repr(self._extractor),
+        }
 
 
 # =============================================================================
@@ -327,8 +338,6 @@ def preset_cwt_hybrid(fif_file: str):
             .run(extract_cwt(freqs=np.arange(1, 101, 1.0))))
 
 
-
-
 # =============================================================================
 # Entry point
 # =============================================================================
@@ -339,20 +348,52 @@ if __name__ == "__main__":
     'jaw_clench': 2,
     }
 
-    FILE = './data_collection/annotated_eeg/chengyi0210.fif'
+    # process multiple files
+    files = [
+        './data_collection/annotated_eeg/chengyi0210.fif',
+        './data_collection/annotated_eeg/pilapil0226.fif',
+    ]
+    save_dir = ''
 
-    # -- Option A: use a preset
-    X, y = preset_deep_learning(FILE)
-    print(X.shape, np.unique(y))
+    all_X, all_y = [], []
 
-    # -- Option B: build a custom pipeline
-    pipeline = MNEPipeline(FILE)
-    pipeline.add(notch(60))
-    pipeline.add(plot_psd("Raw"))          # inspect before filtering
-    pipeline.add(bandpass([(8, 13), (13, 30)]))
-    pipeline.add(plot_psd("After filter")) # inspect after
-    pipeline.add(rereference())
-    pipeline.add(epoch(tmin=0, tmax=3, event_id=EVENT_ID))
-    pipeline.describe()
-    X, y = pipeline.run(extract_csp(n_components=6))
-    print(X.shape, np.unique(y))
+    for file in files:
+        # -- Option A: use a preset
+        X, y = preset_deep_learning(file)
+        print(X.shape, np.unique(y))
+
+        # -- Option B: build a custom pipeline
+        pipeline = MNEPipeline(file)
+        pipeline.add(notch(60))
+        pipeline.add(plot_psd("Raw"))          # inspect before filtering
+        pipeline.add(bandpass([(8, 13), (13, 30)]))
+        pipeline.add(plot_psd("After filter")) # inspect after
+        pipeline.add(rereference())
+        pipeline.add(epoch(tmin=0, tmax=3, event_id=EVENT_ID))
+        pipeline.describe()
+        X, y = pipeline.run(extract_csp(n_components=6))
+        print(X.shape, np.unique(y))
+
+        all_X.append(X)
+        all_y.append(y)
+    
+    X = np.concatenate(all_X, axis=0) 
+    y = np.concatenate(all_y, axis=0)
+
+    # save it 
+    save_path = os.path.join(save_dir, 'dataset.npz') if save_dir else 'dataset.npz'
+    np.savez(save_path, X=X, y=y)
+    print(f"Saved {X.shape[0]} trials to {save_path}")
+
+    # save config
+    config = {
+        'files': files,
+        'event_id': EVENT_ID,
+        'pipeline': pipeline.to_dict()['steps'],  # steps are the same for all files
+        'X_shape': list(X.shape),
+        'y_shape': list(y.shape),
+    }
+    config_path = save_path.replace('.npz', '_config.json')
+    with open(config_path, 'w') as f:
+        json.dump(config, f, indent=2)
+    print(f"Saved config to {config_path}")
