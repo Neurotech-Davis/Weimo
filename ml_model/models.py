@@ -9,6 +9,7 @@ n_classes = 2
 Architecture: Common Spatial Patterns (CSP) for spatial filtering on µ/β frequency bands, followed by Linear Discriminant Analysis (LDA) for classification. No deep learning.
 This remains a widespread approach: CSP extracts task-discriminative spatial features, which are then passed to LDA for classification. Frontiers It serves as the floor baseline against which all deep learning models are compared. Typical 4-class accuracy on BCI IV-2a hovers around 65–70%.
 '''
+# no deep learning, no need to build it out
 
 '''
 2. ShallowConvNet & DeepConvNet — Schirrmeister et al. (2017)
@@ -107,7 +108,6 @@ class ShallowConvNet(nn.Module):
         x = self.classifier(x)
         return x
 
-
 '''
 3. EEGNet — Lawhern et al. (2018)
 Source: Journal of Neural Engineering, 15(5):056013
@@ -122,6 +122,38 @@ Results on BCI IV-2a: ~73–76% (subject-specific). EEGNet-4,2 and EEGNet-8,2 ac
 Why it matters: EEGNet is the de facto lightweight baseline in the field — nearly every subsequent paper benchmarks against it.
 '''
 
+class EEGNet(nn.Module):
+    def __init__(self):
+        super(DeepConvNet, self).__init__()
+        '''
+        C = num channels
+        T = num time points
+        F1 = num temporal filters
+        D = num spatial filters
+        F2 = num pointwise filtesrs
+        N = num classes
+        p = 0.5 for dropout
+
+        https://arxiv.org/pdf/1611.08024
+        '''
+
+        
+        # input (C, T)
+        # reshape (1, C, T)
+        # conv2d (F1, C, T)
+        # batch norm (F1, C, T)
+        # depthwise conv2d (D * F1, 1, T)
+        # batch norm (D * F1, 1, T)
+        # activation (D * F1, 1, T)
+        # average pool 2d (D * F1, 1, T // 4)
+        # drouput (D * F1, 1, T // 4)
+        # separable conv2d (F2, 1, T // 4)
+        # batch norm (F2, 1, T // 4)
+        # activation (F2, 1, T // 4)
+        # average pool 2d (F2, 1, T // 32)
+        # droupout (F2, 1, T // 32)
+        # flatten (F2 * (T // 32)
+        # dense (N)
 '''
 4. ATCNet — Altaheri et al. (2022)
 Source: IEEE Transactions on Neural Systems and Rehabilitation Engineering
