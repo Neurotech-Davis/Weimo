@@ -3,6 +3,8 @@ import torch.nn as nn
 
 n_channels = 10
 n_classes = 2
+sampling_rate = 50
+n_timepoints = 100
 
 '''
 1. Classical Baseline: CSP + LDA
@@ -136,9 +138,13 @@ class EEGNet(nn.Module):
 
         https://arxiv.org/pdf/1611.08024
         '''
+        # hyperparameters:
+        num_temporal_filters = 8
+        num_spatial_filters = 10
 
-        
+        # block 1        
         # input (C, T)
+        # block one
         # reshape (1, C, T)
         # conv2d (F1, C, T)
         # batch norm (F1, C, T)
@@ -147,13 +153,50 @@ class EEGNet(nn.Module):
         # activation (D * F1, 1, T)
         # average pool 2d (D * F1, 1, T // 4)
         # drouput (D * F1, 1, T // 4)
-        # separable conv2d (F2, 1, T // 4)
+        # 2 convolution steps in sequence
+        self.block_one = nn.Sequential(
+            nn.Conv2d(1, num_temporal_filters, kernel_size=(1, sampling_rate // 2), padding='same', bias=False),
+            nn.BatchNorm2d(num_temporal_filters),
+            nn.Conv2d(num_temporal_filters, num_spatial_filters * num_temporal_filters, kernel_size=(n_channels, 1), groups=num_temporal_filters, bias=False),
+            nn.BatchNorm2d(num_spatial_filters * num_temporal_filters),
+            nn.ELU(inplace=True),
+            nn.AvgPool2d(kernel_size=(1, 4)),
+            nn.Dropout(p=0.5),
+        )
+
+        # block 2
+        # separable conv2d (F2, 1, T // 4) which is a kind of depthwise conv2d
         # batch norm (F2, 1, T // 4)
         # activation (F2, 1, T // 4)
         # average pool 2d (F2, 1, T // 32)
         # droupout (F2, 1, T // 32)
         # flatten (F2 * (T // 32)
         # dense (N)
+
+        f2 = num_spatial_filters * num_temporal_filters
+        f2 = num_spatial_filters * num_temporal_filters
+        self.block_two = nn.Sequential(
+            # separable conv = depthwise + pointwise
+            nn.Conv2d(f2, f2, kernel_size=(1, 16), groups=f2, bias=False, padding='same'),
+            nn.Conv2d(f2, f2, kernel_size=(1, 1), bias=False),
+            nn.BatchNorm2d(f2),
+            nn.ELU(inplace=True),
+            nn.AvgPool2d(kernel_size=(1, 8)),
+            nn.Dropout(p=0.5),
+            nn.Flatten(),
+        )
+
+        self.classification = nn.Sequential(
+            nn.Linear(f2 * (n_timepoints // 32), n_classes),
+            nn.Softmax(dim=1),
+        )
+    
+    def forward(self, x):
+        x = x.unsqueeze(1) # (B, C, T) -> (B, 1, C, T)
+        x = self.block_one(x)
+        x = self.block_two(x)
+        x = self.classification(x)
+        return x
 '''
 4. ATCNet — Altaheri et al. (2022)
 Source: IEEE Transactions on Neural Systems and Rehabilitation Engineering
