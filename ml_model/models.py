@@ -780,22 +780,326 @@ class MBMANet(nn.Module):
         return self.classifier(out)
 
 '''
-8. EMD+CWT+SPoC+CSP+ADBN — Mathiyazhagan & Devasena (2025)
-Source: Scientific Reports / PubMed (2025). Link
-Architecture: Fully hybrid classical + deep pipeline:
-
-Preprocessing: EMD (Empirical Mode Decomposition) for intrinsic signal mode extraction + CWT (Continuous Wavelet Transform) for multi-resolution analysis
-Spatial feature enhancement: Source Power Coherence (SPoC) + Common Spatial Patterns (CSP)
-Classifier: Adaptive Deep Belief Network (ADBN) with parameters optimized via Far and Near Optimization (FNO) algorithm
-
-On the BCI IV Dataset 2a, this approach achieves 95.7% accuracy, 96.2% recall, 95.9% precision, and 97.5% specificity; on PhysioNet it yields 94.1% accuracy, 94.0% recall, 93.6% precision, and 95.0% specificity. Nature
-⚠️ Caveat: These very high numbers (95.7%) should be interpreted cautiously. They are from a single paper not yet broadly replicated, and the complexity of the preprocessing pipeline may limit real-world generalizability and real-time use. The BCI IV-2a community consensus sits closer to 80–87% for well-validated models.
-'''
-
-'''
-9. Transformer-Based Model — Scientific Reports (2023)
+8. Transformer-Based Model — Scientific Reports (2023)
 Source: Scientific Reports (2023). Link
 Architecture: Pure transformer network operating on raw EEG time series, without a CNN front-end. Uses multi-head self-attention over temporal windows with positional encoding.
 This transformer-based architecture achieves 99.7% accuracy on the binary-class BCI III IVa dataset and 84% on the 4-class BCI IV-2a dataset. Nature
 Note: The 99.7% figure is on a binary classification task (2-class, small dataset), which inflates performance vs. 4-class benchmarks.
 '''
+class LayerNorm(nn.Module):
+    """
+    LayerNorm with optional bias
+    https://arxiv.org/pdf/1607.06450.pdf
+    """
+
+    def __init__(self, ndim, bias):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(ndim))
+        self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
+
+    def forward(self, x):
+        return F.layer_norm(
+            x,
+            normalized_shape=self.weight.shape,
+            weight=self.weight,
+            bias=self.bias,
+            eps=1e-5,
+        )
+
+
+class MHSA(nn.Module):
+    """
+    Multi-Head Self-Attention block
+    """
+
+    def __init__(self, d_model, n_head, bias, dropout=0.0, flash_att=True):
+        super().__init__()
+
+        assert d_model % n_head == 0
+        # key, query, value
+        self.attn = nn.Linear(d_model, 3 * d_model, bias=bias)
+        self.proj = nn.Linear(d_model, d_model, bias=bias)
+        self.attn_dropout = nn.Dropout(dropout)
+        self.resid_dropout = nn.Dropout(dropout)
+        self.n_head = n_head
+        self.d_model = d_model
+        self.dropout = dropout
+        self.flash_att = flash_att
+
+    def forward(self, x, split_sections=None):
+
+        if split_sections is not None:
+            x = torch.unsqueeze(input=x, dim=0)
+
+        # batch size, sequence length, embedding dimensionality (d_model)
+        B, T, C = x.size()
+
+        # calculate query, key, values for all heads in batch
+        q, k, v = self.attn(x).split(self.d_model, dim=2)
+        q = q.view(B, T, self.n_head, C // self.n_head).transpose(
+            1, 2
+        )  # (B, nh, T, hs)
+        k = k.view(B, T, self.n_head, C // self.n_head).transpose(
+            1, 2
+        )  # (B, nh, T, hs)
+        v = v.view(B, T, self.n_head, C // self.n_head).transpose(
+            1, 2
+        )  # (B, nh, T, hs)
+
+        if split_sections is None:
+            if self.flash_att:
+                y = torch.nn.functional.scaled_dot_product_attention(
+                    q,
+                    k,
+                    v,
+                    attn_mask=None,
+                    dropout_p=self.dropout if self.training else 0,
+                    is_causal=False,
+                )
+            else:
+                y = (
+                    self.attn_dropout(
+                        F.softmax(
+                            (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1))),
+                            dim=-1,
+                        )
+                    )
+                    @ v
+                )
+
+            # re-assemble all head outputs side by side
+            y = y.transpose(1, 2).contiguous().view(B, T, C)
+        else:
+            q = torch.tensor_split(q, split_sections, dim=2)
+            k = torch.tensor_split(k, split_sections, dim=2)
+            v = torch.tensor_split(v, split_sections, dim=2)
+
+            if self.flash_att:
+                att_dropout = self.dropout if self.training else 0
+                # optimized by PyTorch 2.0
+                y = torch.cat(
+                    [
+                        torch.nn.functional.scaled_dot_product_attention(
+                            qs,
+                            ks,
+                            vs,
+                            attn_mask=None,
+                            dropout_p=att_dropout,
+                            is_causal=False,
+                        )
+                        for qs, ks, vs in zip(q, k, v)
+                    ],
+                    dim=2,
+                )
+
+            else:
+                y = torch.cat(
+                    [
+                        self.attn_dropout(
+                            F.softmax(
+                                (qs @ ks.transpose(-2, -1))
+                                * (1.0 / math.sqrt(ks.size(-1))),
+                                dim=-1,
+                            )
+                        )
+                        @ vs
+                        for qs, ks, vs in zip(q, k, v)
+                    ],
+                    dim=2,
+                )
+
+            # re-assemble all head outputs side by side
+            y = y.transpose(1, 2).contiguous().view(B, T, C).squeeze(dim=0)
+
+        # output projection
+        y = self.resid_dropout(self.proj(y))
+        return y
+
+
+class FeedForward(nn.Module):
+    """
+    Feed Forward block from Transformer
+    """
+
+    def __init__(self, d_model, dim_feedforward=None, dropout=0.0, bias=False):
+        super().__init__()
+
+        self.proj_in = nn.Linear(d_model, dim_feedforward, bias=bias)
+        self.gelu = nn.GELU()
+        self.proj = nn.Linear(dim_feedforward, d_model, bias=bias)
+        self.dropout = nn.Dropout(dropout)
+        self.dropout1 = nn.Dropout(dropout)
+
+    def forward(self, x):
+        x = self.proj_in(x)
+        x = self.gelu(x)
+        x = self.dropout1(x)
+        x = self.proj(x)
+        x = self.dropout(x)
+        return x
+
+
+class TransformerEncoderLayer(nn.Module):
+    """
+    Transformer model, based on 'Attention Is All You Need' -> https://arxiv.org/abs/1706.03762
+    """
+
+    def __init__(self, d_model, n_head, dropout=0.0, dim_feedforward=None, bias=False):
+        super().__init__()
+
+        if dim_feedforward is None:
+            dim_feedforward = 4 * d_model
+            print(
+                "dim_feedforward is set to 4*d_model, the default in Vaswani et al. (Attention is all you need)"
+            )
+
+        self.layer_norm_att = LayerNorm(d_model, bias=bias)
+        self.mhsa = MHSA(d_model, n_head, bias, dropout=dropout, flash_att=True)
+        self.layer_norm_ff = LayerNorm(d_model, bias=bias)
+        self.feed_forward = FeedForward(
+            d_model=d_model, dim_feedforward=dim_feedforward, dropout=dropout, bias=bias
+        )
+
+    def forward(self, x, split_sections):
+        x = x + self.mhsa(self.layer_norm_att(x), split_sections)
+        x = x + self.feed_forward(self.layer_norm_ff(x))
+        return x
+
+
+class TransformerEncoder(nn.Module):
+    def __init__(self, n_blocks, d_model, n_head, dropout, bias):
+        super().__init__()
+
+        self.encoder_block = nn.ModuleList(
+            [
+                TransformerEncoderLayer(
+                    d_model=d_model,
+                    n_head=n_head,
+                    dropout=dropout,
+                    dim_feedforward=None,
+                    bias=bias,
+                )
+                for _ in range(n_blocks)
+            ]
+        )
+
+        # GPT2 type of init -> Radford et al. 'Language Models are Unsupervised Multitask Learners'
+        self.apply(self._init_weights)
+        for pn, p in self.named_parameters():
+            if pn.endswith("proj.weight"):
+                torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * n_blocks))
+
+    @staticmethod
+    def _init_weights(module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+
+    def forward(self, x, split_sections):
+        for block in self.encoder_block:
+            x = block(x, split_sections)
+        return x
+
+
+class PBT(nn.Module):
+    def __init__(
+        self,
+        d_input,
+        n_classes,
+        num_embeddings,
+        num_tokens_per_channel,
+        d_model,
+        n_blocks,
+        num_heads,
+        dropout,
+        device,
+        learnable_cls=False,
+        bias_transformer=False,
+        bert=False,
+    ):
+        super().__init__()
+
+        self.num_tokens_per_channel = num_tokens_per_channel
+
+        # linear projection layer, first layer in model
+        self.linear_projection = nn.Linear(
+            in_features=d_input, out_features=d_model, bias=False
+        )
+
+        if learnable_cls:
+            self.cls_token = nn.Parameter(torch.randn(1, 1, d_model) * 0.002)
+        else:
+            self.cls_token = torch.full(
+                size=(1, 1, d_model),
+                fill_value=0,
+                requires_grad=False,
+                dtype=torch.float32,
+                device=device,
+            )
+
+        # trainable parameters for the position embedding
+        # lookup table that stores learnable positional embedding
+        self.pos_embedding = nn.Embedding(
+            num_embeddings=num_embeddings, embedding_dim=d_model
+        )
+
+        self.transformer_encoder = TransformerEncoder(
+            n_blocks=n_blocks,
+            d_model=d_model,
+            n_head=num_heads,
+            dropout=dropout,
+            bias=bias_transformer,
+        )
+
+        self.bert = bert
+        if bert:
+            self.linear_projection_out = nn.Linear(
+                in_features=d_model, out_features=d_input, bias=False
+            )
+
+        self.cls_head = nn.Linear(
+            in_features=d_model, out_features=n_classes, bias=True
+        )
+
+        # init all weights (linear_projection, cls_head )
+        self.apply(self._init_weights)
+
+    @staticmethod
+    def _init_weights(module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.002)
+
+    def forward(self, x, pos, split_sections=None):
+        # Linear Projection, Concatenate [CLS]-Token, add positional embedding
+        # x = torch.cat((self.cls_token.expand(x.size(0), 1, -1), self.linear_projection(x)), dim=1)
+        x = self.linear_projection(x)
+
+        if self.bert:
+            x, pos_masking = self.masking(unmasked=x, probability_mask_token=0.3)
+
+        # Transformer Encoder
+        transformer_out = self.transformer_encoder(
+            x + self.pos_embedding(pos), split_sections
+        )
+
+        if self.bert:
+            logits = self.cls_head(transformer_out[:, 0])
+            transformer_out = self.linear_projection_out(transformer_out[:, 1:])
+
+            # MLP-Classifier, only [CLS]-Token is fed in
+            return transformer_out, logits, pos_masking[:, 1:]
+        else:
+            if split_sections is None:
+                return transformer_out, self.cls_head(transformer_out[:, 0]), None
+            else:
+                # MLP-Classifier, only [CLS]-Token is fed in
+                return (
+                    transformer_out,
+                    self.cls_head(transformer_out[torch.where(pos == 0)[0]]),
+                    None,
+                )
