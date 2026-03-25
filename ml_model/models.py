@@ -616,7 +616,168 @@ Architecture: Tri-branch structure combining parallel multi-head attention with 
 MBMANet's tri-branch architecture combines parallel multi-head attention with SE and CBAM alongside EEGNet and TCN for MI-EEG classification. PubMed Central
 Results on BCI IV-2a: 83.18% — a 3.43% improvement over prior models at time of publication.
 '''
+# ─── Attention modules ────────────────────────────────────────────────────────
 
+class SE(nn.Module):
+    def __init__(self, channels, reduction=4):
+        super().__init__()
+        mid = max(channels // reduction, 1)
+        self.fc = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Linear(channels, mid),
+            nn.ReLU(),
+            nn.Linear(mid, channels),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        return x * self.fc(x).view(x.size(0), x.size(1), 1, 1)
+
+
+class CBAM(nn.Module):
+    def __init__(self, channels, reduction=4):
+        super().__init__()
+        mid = max(channels // reduction, 1)
+        self.ch_mlp = nn.Sequential(
+            nn.Linear(channels, mid), nn.ReLU(), nn.Linear(mid, channels)
+        )
+        self.sp_conv = nn.Conv2d(2, 1, kernel_size=(1, 7), padding=(0, 3))
+
+    def forward(self, x):
+        # channel attention
+        avg = self.ch_mlp(x.mean(dim=[2, 3]))
+        mx  = self.ch_mlp(x.amax(dim=[2, 3]))
+        x = x * torch.sigmoid(avg + mx).view(x.size(0), x.size(1), 1, 1)
+        # spatial attention
+        sp = torch.cat([x.mean(dim=1, keepdim=True), x.amax(dim=1, keepdim=True)], dim=1)
+        return x * torch.sigmoid(self.sp_conv(sp))
+
+
+class SegmentMHA(nn.Module):
+    """MHA on a (B, C, 1, T) segment — treats T as sequence."""
+    def __init__(self, channels, num_heads=2, dropout=0.1):
+        super().__init__()
+        self.mha  = nn.MultiheadAttention(channels, num_heads, dropout=dropout, batch_first=True)
+        self.norm = nn.LayerNorm(channels)
+
+    def forward(self, x):
+        seq = x.squeeze(2).permute(0, 2, 1)          # (B, T, C)
+        out, _ = self.mha(seq, seq, seq)
+        out = self.norm(seq + out)
+        return out.permute(0, 2, 1).unsqueeze(2)      # (B, C, 1, T)
+
+
+# ─── TCN ─────────────────────────────────────────────────────────────────────
+
+class TCNBlock(nn.Module):
+    def __init__(self, in_ch, out_ch, kernel_size=3, dilation=1, dropout=0.2):
+        super().__init__()
+        pad = (kernel_size - 1) * dilation
+        self.conv = nn.Sequential(
+            nn.Conv1d(in_ch, out_ch, kernel_size, dilation=dilation, padding=pad),
+            nn.BatchNorm1d(out_ch),
+            nn.ELU(),
+            nn.Dropout(dropout),
+        )
+        self.shortcut = nn.Conv1d(in_ch, out_ch, 1) if in_ch != out_ch else nn.Identity()
+        self.act = nn.ELU()
+
+    def forward(self, x):
+        out = self.conv(x)[..., :x.size(-1)]  # trim causal padding
+        return self.act(out + self.shortcut(x))
+
+
+class TCN(nn.Module):
+    def __init__(self, in_ch, out_ch, n_layers=2, kernel_size=3, dropout=0.2):
+        super().__init__()
+        self.layers = nn.Sequential(*[
+            TCNBlock(in_ch if i == 0 else out_ch, out_ch,
+                     kernel_size, dilation=2**i, dropout=dropout)
+            for i in range(n_layers)
+        ])
+
+    def forward(self, x):
+        return self.layers(x)
+
+
+# ─── EEGNet branch (no flatten/classifier) ───────────────────────────────────
+
+class EEGNetBranch(nn.Module):
+    """Single EEGNet branch, outputs (B, F2, 1, T//32)."""
+    def __init__(self, F1=8, D=2, dropout=0.5):
+        super().__init__()
+        F2 = F1 * D
+        self.block_one = nn.Sequential(
+            nn.Conv2d(1, F1, kernel_size=(1, sampling_rate // 2), padding='same', bias=False),
+            nn.BatchNorm2d(F1),
+            nn.Conv2d(F1, F2, kernel_size=(n_channels, 1), groups=F1, bias=False),
+            nn.BatchNorm2d(F2),
+            nn.ELU(inplace=True),
+            nn.AvgPool2d(kernel_size=(1, 4)),
+            nn.Dropout(p=dropout),
+        )
+        self.block_two = nn.Sequential(
+            nn.Conv2d(F2, F2, kernel_size=(1, 16), groups=F2, padding='same', bias=False),
+            nn.Conv2d(F2, F2, kernel_size=(1, 1), bias=False),
+            nn.BatchNorm2d(F2),
+            nn.ELU(inplace=True),
+            nn.AvgPool2d(kernel_size=(1, 8)),
+            nn.Dropout(p=dropout),
+        )
+        self.out_channels = F2
+
+    def forward(self, x):
+        return self.block_two(self.block_one(x))
+
+
+# ─── MBMANet ─────────────────────────────────────────────────────────────────
+
+_Tprime = n_timepoints // 32   # temporal length after EEGNet branches: 225//32 = 7
+
+class MBMANet(nn.Module):
+    def __init__(self, F1s=(4, 8, 16), D=2, tcn_channels=64, tcn_layers=2, dropout=0.5):
+        super().__init__()
+
+        # Module 2: three EEGNet branches with different F1 for diverse features
+        self.branches = nn.ModuleList([EEGNetBranch(F1, D, dropout) for F1 in F1s])
+        seg_channels   = [F1 * D for F1 in F1s]   # [8, 16, 32]
+        total_channels = sum(seg_channels)          # 56
+
+        # Module 3: one attention mechanism per segment (branch output)
+        self.mha_attn  = SegmentMHA(seg_channels[0], num_heads=2)
+        self.cbam_attn = CBAM(seg_channels[1])
+        self.se_attn   = SE(seg_channels[2])
+
+        # TCN on fused attended features
+        self.tcn = TCN(total_channels, tcn_channels, n_layers=tcn_layers, dropout=dropout)
+
+        # Module 4: classifier
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Dropout(dropout),
+            nn.Linear(tcn_channels * _Tprime, n_classes),
+        )
+
+    def forward(self, x):
+        # x: (B, 1, n_channels, n_timepoints)
+
+        # Module 2: parallel EEGNet branches → (B, F2_i, 1, T')
+        b0, b1, b2 = [branch(x) for branch in self.branches]
+
+        # Module 3: different attention per segment
+        b0 = self.mha_attn(b0)     # MHA
+        b1 = self.cbam_attn(b1)    # CBAM
+        b2 = self.se_attn(b2)      # SE
+
+        # fuse + squeeze H dim → (B, total_channels, T')
+        fused = torch.cat([b0, b1, b2], dim=1).squeeze(2)
+
+        # TCN → (B, tcn_channels, T')
+        out = self.tcn(fused)
+
+        # classify
+        return self.classifier(out)
 
 '''
 8. EMD+CWT+SPoC+CSP+ADBN — Mathiyazhagan & Devasena (2025)
