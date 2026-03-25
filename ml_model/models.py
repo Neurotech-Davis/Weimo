@@ -133,7 +133,7 @@ Why it matters: EEGNet is the de facto lightweight baseline in the field — nea
 
 class EEGNet(nn.Module):
     def __init__(self, num_temporal_filters = 8, num_spatial_filters = 10):
-        super(DeepConvNet, self).__init__()
+        super(EEGNet, self).__init__()
         '''
         C = num channels
         T = num time points
@@ -558,6 +558,56 @@ Results:
 BCI IV-2a (subject-specific): 82.52% (Kappa: 0.7670)
 Outperforms EEG Conformer by 4.86% and DeepConvNet by 4.74%
 '''
+
+class CTNet(nn.Module):
+    def __init__(self, num_temporal_filters=8, D=2, dropout=0.5, d=16):
+        super(CTNet, self).__init__()
+        # F1 = num_temporal_filters, F2 = F1*D after depthwise, d = output dim
+        F1 = num_temporal_filters
+        F1D = F1 * D  # channels after depthwise
+        _t = n_timepoints                   # 225
+        _t = (_t - (sampling_rate // 4) + 1)  # after temporal conv... wait, padding='same' so unchanged: 225
+        _t = _t // 4                        # after AvgPool(1,4): 56
+        _t = _t - 16 + 1                    # after spatial conv (1,16), no padding: 41
+        Tc = _t // 2                        # after AvgPool(1,2): 20
+
+        fc_input_size = Tc * d              # 320
+
+        self.conv_layer = nn.Sequential(
+            # temporal conv
+            nn.Conv2d(1, F1, kernel_size=(1, sampling_rate // 4), padding='same', bias=False),
+            nn.BatchNorm2d(F1),
+            # depthwise spatial conv — collapses channel dim
+            nn.Conv2d(F1, F1D, kernel_size=(n_channels, 1), groups=F1, bias=False),
+            nn.BatchNorm2d(F1D),
+            nn.ELU(inplace=True),
+            nn.AvgPool2d(kernel_size=(1, 4)),
+            nn.Dropout(p=dropout),
+            # spatial conv — extracts higher-level temporal features
+            nn.Conv2d(F1D, d, kernel_size=(1, 16), bias=False),
+            nn.BatchNorm2d(d),
+            nn.ELU(inplace=True),
+            nn.AvgPool2d(kernel_size=(1, 2)),   # Tc = 20
+            nn.Dropout(p=dropout),
+        ) # output is (B, d, 1, Tc) = (B, 16, 1, 20)
+
+        self.transformer = TransformerEncoder(depth=6, emb_size=d)
+
+        self.classifier = nn.Sequential(
+            nn.Dropout(p=0.5),
+            nn.Linear(d * Tc, n_classes)
+        )
+
+    def forward(self, x):
+        x = self.conv_layer(x)          # (B, d, 1, Tc)
+        cnn_out = x.squeeze(2).permute(0, 2, 1)   # (B, Tc, d)
+        trans_out = self.transformer(cnn_out)      # (B, Tc, d)
+        x = cnn_out + trans_out         # CTNet's residual add between CNN and transformer
+        x = x.flatten(1)                # (B, Tc*d)
+        x = self.classifier(x)
+        return x
+
+
 
 
 '''
