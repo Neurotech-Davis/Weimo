@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 n_channels = 10
 n_classes = 2
@@ -125,7 +126,7 @@ Why it matters: EEGNet is the de facto lightweight baseline in the field — nea
 '''
 
 class EEGNet(nn.Module):
-    def __init__(self):
+    def __init__(self, num_temporal_filters = 8, num_spatial_filters = 10):
         super(DeepConvNet, self).__init__()
         '''
         C = num channels
@@ -138,10 +139,6 @@ class EEGNet(nn.Module):
 
         https://arxiv.org/pdf/1611.08024
         '''
-        # hyperparameters:
-        num_temporal_filters = 8
-        num_spatial_filters = 10
-
         # block 1        
         # input (C, T)
         # block one
@@ -197,6 +194,7 @@ class EEGNet(nn.Module):
         x = self.block_two(x)
         x = self.classification(x)
         return x
+
 '''
 4. ATCNet — Altaheri et al. (2022)
 Source: IEEE Transactions on Neural Systems and Rehabilitation Engineering
@@ -209,7 +207,160 @@ TCN block: Temporal Convolutional Network with dilated causal convolutions and r
 Additionally uses a sliding window augmentation strategy at the convolutional module output to increase effective training data.
 ATCNet integrates attention mechanisms with TCN and CNN architectures — the attention block applies multi-head self-attention to identify key features, while the TCN block extracts advanced temporal features. Frontiers
 Results on BCI IV-2a: ~85–87% (subject-specific). ATCNet represents one of the most advanced currently available approaches combining attention mechanisms with temporal convolutional networks for MI-EEG decoding. arXiv
+preprocessing: none
 '''
+
+class AttentionBlock(nn.Module):
+    def __init__(self, embed_dim, num_heads=2, dropout=0.5):
+        super(AttentionBlock, self).__init__()
+
+        self.norm = nn.LayerNorm(embed_dim)
+        self.attention = nn.MultiheadAttention(
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            batch_first=True,
+            dropout=dropout
+        )
+
+    def forward(self, x):
+        # x: (B, F, 1, n)
+        B, F, _, n = x.shape
+        x = x.squeeze(2).permute(0, 2, 1)  # (B, n, F)
+
+        # pre-norm → attention → residual
+        normed = self.norm(x)
+        attn_out, _ = self.attention(normed, normed, normed)
+        x = x + attn_out                    # (B, n, F)
+
+        return x
+
+class DilatedCausalConv1d(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, dilation):
+        super(DilatedCausalConv1d, self).__init__()
+        self.kernel_size = kernel_size
+        self.dilation = dilation
+        self.padding = (kernel_size - 1) * dilation
+        
+        self.conv = nn.Conv1d(
+            in_channels,
+            out_channels,
+            kernel_size,
+            padding=0, # Manual padding will be applied
+            dilation=dilation
+        )
+
+    def forward(self, x):
+        # Pad the input tensor on the left side
+        # The padding format is (padding_left, padding_right) for the last dimension
+        x_padded = F.pad(x, (self.padding, 0), 'constant', 0)
+        
+        # Apply the convolution
+        output = self.conv(x_padded)
+        
+        return output
+
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, dilation):
+        super(ResidualBlock, self).__init__()
+
+        self.conv_block = nn.Sequential(
+            DilatedCausalConv1d(in_channels, out_channels, kernel_size, dilation),
+            nn.BatchNorm1d(out_channels),
+            nn.ELU(inplace=True),
+            DilatedCausalConv1d(out_channels, out_channels, kernel_size, dilation),
+            nn.BatchNorm1d(out_channels),
+            nn.ELU(inplace=True),
+        )
+
+        # 1x1 conv if dimensions don't match, otherwise identity
+        if in_channels != out_channels:
+            self.residual = nn.Conv1d(in_channels, out_channels, kernel_size=1)
+        else:
+            self.residual = nn.Identity()
+
+    def forward(self, x):
+        return self.conv_block(x) + self.residual(x)
+
+
+class TCBlock(nn.Module):
+    def __init__(self, in_channels=32, out_channels=32, kernel_size=4):
+        super(TCBlock, self).__init__()
+
+        # L=2 residual blocks, dilation doubles each block
+        self.network = nn.Sequential(
+            ResidualBlock(in_channels, out_channels, kernel_size, dilation=1),
+            ResidualBlock(out_channels, out_channels, kernel_size, dilation=2),
+        )
+
+    def forward(self, x):
+        # x: (B, F, n) — Conv1d expects (B, channels, length)
+        x = self.network(x)     # (B, F, n)
+        x = x[:, :, -1]        # take last timestep output → (B, F)
+        return x
+
+
+class ATCNet(nn.Module):
+    def __init__(self, num_filters = 16, d = 2, p2 = 8, num_heads=2, block_one_dropout=0.3, attn_drouput=0.5):
+        super(ATCNet, self).__init__()
+        '''
+        3 main blocks
+        block 1: convolutional 
+        - 3 layers
+        block 2: attention
+        - multi head attention
+        block 3: temporal convolution
+        '''
+
+        # input (B,  1,  C,  T)
+        self.block_one = nn.Sequential(
+            # layer one
+            nn.Conv2d(1, num_filters, kernel_size=(1, sampling_rate // 4), bias=False, padding='same'), # (B, 16,  C,  T)
+            nn.BatchNorm2d(num_filters), # (B, 16,  C,  T)
+
+            # layer two
+            nn.Conv2d(num_filters, num_filters * d, kernel_size=(n_channels, 1), groups=num_filters, bias=False), # (B, 32,  1,  T)
+            nn.BatchNorm2d(num_filters * d),
+            nn.ELU(inplace=True),
+            nn.AvgPool2d(kernel_size=(1, 4)), # (B, 32,  1,  T//4)
+            nn.Dropout2d(p=block_one_dropout),
+            
+            # layer three
+            nn.Conv2d(num_filters * d, num_filters * d, kernel_size = (1, sampling_rate // 8), bias=False), # (B, 32,  1,  T//4)
+            nn.BatchNorm2d(num_filters * d),
+            nn.ELU(inplace=True),
+            nn.AvgPool2d(kernel_size=(1, p2)), # (B, 32,  1,  T//32)
+            nn.Dropout2d(p=block_one_dropout),
+        )
+        # output of block one: (B, 32,  1,  T//32)
+
+        self.block_two = AttentionBlock(
+            embed_dim=num_filters * d, 
+            num_heads=num_heads,
+            dropout=attn_drouput,
+        )
+        # output is (B, n, F)
+
+        self.block_three = TCBlock(
+            in_channels=num_filters * d, 
+            out_channels=num_filters * d, 
+            kernel_size=4
+        )
+
+        self.classifier = nn.Sequential(
+            nn.Linear(num_filters * d, n_classes),
+            nn.Softmax(dim=1)
+        )
+
+    def forward(self, x):
+        x = self.block_one(x)           # (B, F, 1, n)
+        x = self.block_two(x)           # (B, n, F)
+        x = x.permute(0, 2, 1)         # (B, F, n)
+        x = self.block_three(x)         # (B, F)
+        x = self.classifier(x)            # (B, n_classes)
+
+        return x
+
+
 
 '''
 5. EEG Conformer — Song et al. (2022/2023)
