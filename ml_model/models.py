@@ -1,11 +1,17 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch import Tensor
+from torchvision.transforms import Compose, Resize, ToTensor
+from einops import rearrange, reduce, repeat
+from einops.layers.torch import Rearrange, Reduce
+import math
 
 n_channels = 10
 n_classes = 2
 sampling_rate = 50
-n_timepoints = 100
+trial_duration = 4.5
+n_timepoints = int(sampling_rate * trial_duration)
 
 '''
 1. Classical Baseline: CSP + LDA
@@ -210,9 +216,9 @@ Results on BCI IV-2a: ~85–87% (subject-specific). ATCNet represents one of the
 preprocessing: none
 '''
 
-class AttentionBlock(nn.Module):
+class ATCAttentionBlock(nn.Module):
     def __init__(self, embed_dim, num_heads=2, dropout=0.5):
-        super(AttentionBlock, self).__init__()
+        super(ATCAttentionBlock, self).__init__()
 
         self.norm = nn.LayerNorm(embed_dim)
         self.attention = nn.MultiheadAttention(
@@ -281,7 +287,6 @@ class ResidualBlock(nn.Module):
     def forward(self, x):
         return self.conv_block(x) + self.residual(x)
 
-
 class TCBlock(nn.Module):
     def __init__(self, in_channels=32, out_channels=32, kernel_size=4):
         super(TCBlock, self).__init__()
@@ -297,7 +302,6 @@ class TCBlock(nn.Module):
         x = self.network(x)     # (B, F, n)
         x = x[:, :, -1]        # take last timestep output → (B, F)
         return x
-
 
 class ATCNet(nn.Module):
     def __init__(self, num_filters = 16, d = 2, p2 = 8, num_heads=2, block_one_dropout=0.3, attn_drouput=0.5):
@@ -333,7 +337,7 @@ class ATCNet(nn.Module):
         )
         # output of block one: (B, 32,  1,  T//32)
 
-        self.block_two = AttentionBlock(
+        self.block_two = ATCAttentionBlock(
             embed_dim=num_filters * d, 
             num_heads=num_heads,
             dropout=attn_drouput,
@@ -372,7 +376,171 @@ class ATCNet(nn.Module):
 - BCI IV-2a: 78.66%
 - BCI IV-2b: 84.63%
 - SEED (emotion): 95.30%
+
+preprocessing:
+- bandpass filtering
+- 6 order chebyshev filter 
+- Z score standardization
+ xo = (xi - mean) / sqrt(variance)
+    xi = band pass filtered data
+    xo = output of standardization
+
+https://pubmed.ncbi.nlm.nih.gov/37015413/
 '''
+
+class PatchEmbedding(nn.Module):
+    def __init__(self, emb_size=40):
+        # self.patch_size = patch_size
+        super().__init__()
+
+        self.shallownet = nn.Sequential(
+            nn.Conv2d(1, 40, (1, 25), (1, 1)),
+            nn.Conv2d(40, 40, (n_channels, 1), (1, 1)),
+            nn.BatchNorm2d(40),
+            nn.ELU(),
+            nn.AvgPool2d((1, 75), (1, 15)),  # pooling acts as slicing to obtain 'patch' along the time dimension as in ViT
+            nn.Dropout(0.5),
+        )
+
+        self.projection = nn.Sequential(
+            nn.Conv2d(40, emb_size, (1, 1), stride=(1, 1)),  # transpose, conv could enhance fiting ability slightly
+            Rearrange('b e (h) (w) -> b (h w) e'),
+        )
+
+
+    def forward(self, x: Tensor) -> Tensor:
+        b, _, _, _ = x.shape
+        x = self.shallownet(x)
+        x = self.projection(x)
+        return x
+
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, emb_size, num_heads, dropout):
+        super().__init__()
+        self.emb_size = emb_size
+        self.num_heads = num_heads
+        self.keys = nn.Linear(emb_size, emb_size)
+        self.queries = nn.Linear(emb_size, emb_size)
+        self.values = nn.Linear(emb_size, emb_size)
+        self.att_drop = nn.Dropout(dropout)
+        self.projection = nn.Linear(emb_size, emb_size)
+
+    def forward(self, x: Tensor, mask: Tensor = None) -> Tensor:
+        queries = rearrange(self.queries(x), "b n (h d) -> b h n d", h=self.num_heads)
+        keys = rearrange(self.keys(x), "b n (h d) -> b h n d", h=self.num_heads)
+        values = rearrange(self.values(x), "b n (h d) -> b h n d", h=self.num_heads)
+        energy = torch.einsum('bhqd, bhkd -> bhqk', queries, keys)  
+        if mask is not None:
+            fill_value = torch.finfo(torch.float32).min
+            energy.mask_fill(~mask, fill_value)
+
+        scaling = self.emb_size ** (1 / 2)
+        att = F.softmax(energy / scaling, dim=-1)
+        att = self.att_drop(att)
+        out = torch.einsum('bhal, bhlv -> bhav ', att, values)
+        out = rearrange(out, "b h n d -> b n (h d)")
+        out = self.projection(out)
+        return out
+
+
+class ResidualAdd(nn.Module):
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+
+    def forward(self, x, **kwargs):
+        res = x
+        x = self.fn(x, **kwargs)
+        x += res
+        return x
+
+
+class FeedForwardBlock(nn.Sequential):
+    def __init__(self, emb_size, expansion, drop_p):
+        super().__init__(
+            nn.Linear(emb_size, expansion * emb_size),
+            nn.GELU(),
+            nn.Dropout(drop_p),
+            nn.Linear(expansion * emb_size, emb_size),
+        )
+
+
+class GELU(nn.Module):
+    def forward(self, input: Tensor) -> Tensor:
+        return input*0.5*(1.0+torch.erf(input/math.sqrt(2.0)))
+
+
+class TransformerEncoderBlock(nn.Sequential):
+    def __init__(self,
+                 emb_size,
+                 num_heads=10,
+                 drop_p=0.5,
+                 forward_expansion=4,
+                 forward_drop_p=0.5):
+        super().__init__(
+            ResidualAdd(nn.Sequential(
+                nn.LayerNorm(emb_size),
+                MultiHeadAttention(emb_size, num_heads, drop_p),
+                nn.Dropout(drop_p)
+            )),
+            ResidualAdd(nn.Sequential(
+                nn.LayerNorm(emb_size),
+                FeedForwardBlock(
+                    emb_size, expansion=forward_expansion, drop_p=forward_drop_p),
+                nn.Dropout(drop_p)
+            )
+            ))
+
+
+class TransformerEncoder(nn.Sequential):
+    def __init__(self, depth, emb_size):
+        super().__init__(*[TransformerEncoderBlock(emb_size) for _ in range(depth)])
+
+
+class ClassificationHead(nn.Sequential):
+    def __init__(self, emb_size, n_classes, fc_input_size):
+        super().__init__()
+        
+        # global average pooling
+        self.clshead = nn.Sequential(
+            Reduce('b n e -> b e', reduction='mean'),
+            nn.LayerNorm(emb_size),
+            nn.Linear(emb_size, n_classes)
+        )
+        self.fc = nn.Sequential(
+            nn.Linear(fc_input_size, 256),
+            nn.ELU(),
+            nn.Dropout(0.5),
+            nn.Linear(256, 32),
+            nn.ELU(),
+            nn.Dropout(0.3),
+            nn.Linear(32, n_classes)
+        )
+
+    def forward(self, x):
+        x = x.contiguous().view(x.size(0), -1)
+        out = self.fc(x)
+        return x, out
+
+
+class Conformer(nn.Sequential):
+    def __init__(self, emb_size=40, depth=6, n_classes=4):
+
+        _t = n_timepoints - 24                                      # after Conv2d (1,25): 201
+        _t = (_t - 75) // 15 + 1                                   # after AvgPool2d (1,75) stride (1,15): 9
+        emb_size = 40
+        fc_input_size = _t * emb_size                               # 360
+        
+        super().__init__(
+
+            PatchEmbedding(emb_size),
+            TransformerEncoder(depth, emb_size),
+            ClassificationHead(emb_size, n_classes, fc_input_size)
+        )
+
+
+
 
 '''
 6. CTNet — Zhao et al. (2024)
