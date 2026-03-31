@@ -127,6 +127,17 @@ def plot_psd(title: str = "PSD", fmin: float = 0.1, fmax: float = 150.0):
     apply.__repr__ = lambda: f"plot_psd(title={title!r})"
     return apply
 
+def add_fake_jaw_clench(onset: float = 10.0, duration: float = 3.0):
+    def apply(raw):
+        fake = mne.Annotations(
+            onset=[onset],
+            duration=[duration],
+            description=['jaw_clench'],
+            orig_time=raw.annotations.orig_time  # match existing orig_time
+        )
+        raw.set_annotations(raw.annotations + fake)
+        return raw
+    return apply
 
 # =============================================================================
 # Feature extractors — take a processed Raw, return (X, y)
@@ -311,7 +322,9 @@ if __name__ == "__main__":
         pipeline.add(notch(60))
         pipeline.add(bandpass([(8, 13), (13, 30)]))
         pipeline.add(rereference())
+        # always add this add idle class and the epoch class
         pipeline.add(add_idle_class(window_dur=3.0, idle_start_min=1.0))
+        pipeline.add(add_fake_jaw_clench())
         pipeline.add(epoch(tmin=0, tmax=3))
         pipeline.describe()
 

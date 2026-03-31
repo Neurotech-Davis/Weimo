@@ -6,8 +6,7 @@ import mne
 
 class EEGDataset(Dataset):
     def __init__(self):
-        '''
-            
+        ''' 
         '''
 
 
