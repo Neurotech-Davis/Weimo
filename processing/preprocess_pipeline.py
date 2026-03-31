@@ -128,11 +128,16 @@ def plot_psd(title: str = "PSD", fmin: float = 0.1, fmax: float = 150.0):
     return apply
 
 def add_fake_jaw_clench(onset: float = 10.0, duration: float = 3.0):
-        def apply(raw):
-            fake = mne.Annotations(onset=[onset], duration=[duration], description=['jaw_clench'])
-            raw.set_annotations(raw.annotations + fake)
-            return raw
-        return apply
+    def apply(raw):
+        fake = mne.Annotations(
+            onset=[onset],
+            duration=[duration],
+            description=['jaw_clench'],
+            orig_time=raw.annotations.orig_time  # match existing orig_time
+        )
+        raw.set_annotations(raw.annotations + fake)
+        return raw
+    return apply
 
 # =============================================================================
 # Feature extractors — take a processed Raw, return (X, y)
