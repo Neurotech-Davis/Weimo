@@ -195,7 +195,6 @@ class EEGNet(nn.Module):
         )
     
     def forward(self, x):
-        x = x.unsqueeze(1) # (B, C, T) -> (B, 1, C, T)
         x = self.block_one(x)
         x = self.block_two(x)
         x = self.classification(x)
