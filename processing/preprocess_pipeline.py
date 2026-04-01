@@ -176,7 +176,7 @@ def extract_csp(n_components: int = 6):
 
         print(f"[CSP] shape: {X.shape}")
         return X, y
-    extract.__repr__ = lambda: f"extract_csp(n_components={n_components})"
+    extract._desc = f"extract_csp(n_components={n_components})"
     return extract
 
 
@@ -193,7 +193,7 @@ def extract_tensor(scale: bool = True):
         X = X[:, np.newaxis, :, :].astype(np.float32)
         print(f"[Tensor] shape: {X.shape}")
         return X, y
-    extract.__repr__ = lambda: f"extract_tensor(scale={scale})"
+    extract._desc = f"extract_tensor(scale={scale})"
     return extract
 
 
@@ -211,7 +211,7 @@ def extract_cwt(freqs: np.ndarray = None, n_cycles: float = 6.0):
         ).astype(np.float32)
         print(f"[CWT] shape: {X_cwt.shape}")
         return X_cwt, y
-    extract.__repr__ = lambda: f"extract_cwt(n_cycles={n_cycles})"
+    extract._desc = f"extract_cwt(n_cycles={n_cycles})"
     return extract
 
 
@@ -245,7 +245,7 @@ def extract_bandpower(bands: dict = None):
         X = np.array(features, dtype=np.float32)
         print(f"[Bandpower] shape: {X.shape}  bands: {list(_bands.keys())}")
         return X, y
-    extract.__repr__ = lambda: f"extract_bandpower(bands={list(_bands.keys())})"
+    extract._desc = f"extract_bandpower(bands={list(_bands.keys())})"
     return extract
 
 def extract_pca(n_components: int = 10):
@@ -270,7 +270,18 @@ def extract_pca(n_components: int = 10):
         print(f"[PCA] shape: {X_pca.shape}  |  variance explained: {explained:.2%}")
         return X_pca, y
 
-    extract.__repr__ = lambda: f"extract_pca(n_components={n_components})"
+    extract._desc = f"extract_pca(n_components={n_components})"
+    return extract
+
+def extract_raw():
+    def extract(raw: mne.io.Raw):
+        assert hasattr(raw, '_epochs'), "Add epoch() to the pipeline before extracting features."
+        eeg_channels = _get_eeg_channels(raw)
+        X = raw._epochs.get_data(picks=eeg_channels).astype(np.float32)
+        y = raw._epochs.events[:, 2]
+        print(f"[Raw] shape: {X.shape}")
+        return X, y
+    extract._desc = "extract_raw()"
     return extract
 
 # =============================================================================
@@ -319,6 +330,9 @@ if __name__ == "__main__":
 
     all_X, all_y = [], []
 
+    # Define the extractor once so its repr can be captured in the config
+    extractor = extract_csp(n_components=6)
+
     for file in files:
         pipeline = MNEPipeline(file)
         pipeline.add(notch(60))
@@ -332,7 +346,7 @@ if __name__ == "__main__":
 
         # run without extractor to keep the raw object (for event_id access)
         raw_processed = pipeline.run()
-        X, y = extract_csp(n_components=6)(raw_processed)
+        X, y = extractor(raw_processed)
 
         # remap MNE's auto-assigned ids to consistent 0/1/2 labels
         auto_ids = raw_processed._event_id  # e.g. {'idle': 1, 'jaw_clench': 2, 'move': 3}
@@ -357,6 +371,7 @@ if __name__ == "__main__":
         'X_shape': list(X.shape),
         'y_shape': list(y.shape),
         'pipeline': pipeline.to_dict()['steps'],
+        'extractor': getattr(extractor, '_desc', repr(extractor)),
     }
     config_path = save_path.replace('.npz', '_config.json')
     with open(config_path, 'w') as f:
