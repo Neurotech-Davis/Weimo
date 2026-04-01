@@ -15,7 +15,7 @@ def notch(freq: float = 60.0):
     def apply(raw: mne.io.Raw) -> mne.io.Raw:
         raw.notch_filter(freq)
         return raw
-    apply.__repr__ = lambda: f"notch(freq={freq})"
+    apply._desc = f"notch(freq={freq})"
     return apply
 
 
@@ -27,7 +27,7 @@ def bandpass(bands: list[tuple]):
             filtered.filter(l_freq=low_cut, h_freq=high_cut)
             raw._band_data[(low_cut, high_cut)] = filtered
         return raw
-    apply.__repr__ = lambda: f"bandpass(bands={bands})"
+    apply._desc = f"bandpass(bands={bands})"
     return apply
 
 
@@ -35,7 +35,7 @@ def rereference(ref: str = "average"):
     def apply(raw: mne.io.Raw) -> mne.io.Raw:
         raw.set_eeg_reference(ref_channels=ref, projection=False)
         return raw
-    apply.__repr__ = lambda: f"rereference(ref={ref!r})"
+    apply._desc = f"rereference(ref={ref!r})"
     return apply
 
 
@@ -54,7 +54,7 @@ def epoch(tmin: float = 0.0, tmax: float = 3.0,
         raw._event_id = selected_ids  # store for remapping later
         print(f"Epoched: {len(raw._epochs)} trials  |  classes: {list(selected_ids.keys())}")
         return raw
-    apply.__repr__ = lambda: f"epoch(tmin={tmin}, tmax={tmax})"
+    apply._desc = f"epoch(tmin={tmin}, tmax={tmax})"
     return apply
 
 
@@ -102,7 +102,7 @@ def add_idle_class(window_dur: float = 3.0, idle_start_min: float = 1.0, label: 
         print(f"[idle] Added {len(idle_onsets)} idle windows  |  label: '{label}'")
         return raw
 
-    apply.__repr__ = lambda: f"add_idle_class(window_dur={window_dur}, idle_start_min={idle_start_min})"
+    apply._desc = f"add_idle_class(window_dur={window_dur}, idle_start_min={idle_start_min})"
     return apply
 
 
@@ -124,7 +124,7 @@ def plot_psd(title: str = "PSD", fmin: float = 0.1, fmax: float = 150.0):
         plt.tight_layout()
         plt.show()
         return raw
-    apply.__repr__ = lambda: f"plot_psd(title={title!r})"
+    apply._desc = f"plot_psd(title={title!r})"
     return apply
 
 def add_fake_jaw_clench(onset: float = 10.0, duration: float = 3.0):
@@ -137,6 +137,7 @@ def add_fake_jaw_clench(onset: float = 10.0, duration: float = 3.0):
         )
         raw.set_annotations(raw.annotations + fake)
         return raw
+    apply._desc = f"add_fake_jaw_clench(onset={onset}, duration={duration})"
     return apply
 
 # =============================================================================
@@ -300,7 +301,7 @@ class MNEPipeline:
         return raw
 
     def to_dict(self):
-        return {'steps': [repr(s) for s in self.steps]}
+        return {'steps': [getattr(s, '_desc', repr(s)) for s in self.steps]}
 
 
 # =============================================================================
@@ -312,7 +313,8 @@ if __name__ == "__main__":
         './data_collection/annotated_eeg/chengyi0210.fif',
         './data_collection/annotated_eeg/pilapil0226.fif',
     ]
-    save_dir = ''
+    save_dir = './data_collection/preprocessed_data'
+    preprocessed_data_filename = 'chengyi.npz'
     label_map = {'idle': 0, 'move': 1, 'jaw_clench': 2}
 
     all_X, all_y = [], []
@@ -345,7 +347,7 @@ if __name__ == "__main__":
     y = np.concatenate(all_y, axis=0)
     print(f"Total: {X.shape}, labels: {np.unique(y)}")
 
-    save_path = os.path.join(save_dir, 'dataset.npz') if save_dir else 'dataset.npz'
+    save_path = os.path.join(save_dir, preprocessed_data_filename) if save_dir else 'dataset.npz'
     np.savez(save_path, X=X, y=y)
     print(f"Saved {X.shape[0]} trials to {save_path}")
 
