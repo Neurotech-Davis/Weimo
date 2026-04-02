@@ -320,6 +320,7 @@ class MNEPipeline:
 # =============================================================================
 
 if __name__ == "__main__":
+    # parameters and file paths here
     files = [
         './data_collection/annotated_eeg/chengyi0210.fif',
         './data_collection/annotated_eeg/pilapil0226.fif',
@@ -327,11 +328,11 @@ if __name__ == "__main__":
     save_dir = './data_collection/preprocessed_data'
     preprocessed_data_filename = 'chengyi.npz'
     label_map = {'idle': 0, 'move': 1, 'jaw_clench': 2}
+    
+    # define the extractor once so its repr can be captured in the config
+    extractor = extract_raw()
 
     all_X, all_y = [], []
-
-    # Define the extractor once so its repr can be captured in the config
-    extractor = extract_csp(n_components=6)
 
     for file in files:
         pipeline = MNEPipeline(file)
