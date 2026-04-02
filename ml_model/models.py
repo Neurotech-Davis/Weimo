@@ -7,8 +7,8 @@ from einops import rearrange, reduce, repeat
 from einops.layers.torch import Rearrange, Reduce
 import math
 
-n_channels = 10
-n_classes = 2
+n_channels = 7
+n_classes = 3
 sampling_rate = 50
 trial_duration = 4.5
 n_timepoints = int(sampling_rate * trial_duration)
@@ -31,7 +31,7 @@ Results on BCI IV-2a (4-class): ShallowConvNet ~75–76% accuracy; DeepConvNet s
 '''
 
 class DeepConvNet(nn.Module):
-    def __init__(self):
+    def __init__(self, n_channels, n_classes):
         super(DeepConvNet, self).__init__()
 
         self.max_pool = nn.MaxPool2d(kernel_size=(1,3), stride=(1,3))
@@ -89,7 +89,7 @@ class DeepConvNet(nn.Module):
         return x
     
 class ShallowConvNet(nn.Module):
-    def __init__(self, n_channels=22, n_classes=4):
+    def __init__(self, n_channels, n_classes):
         super(ShallowConvNet, self).__init__()
 
         self.temporal_conv = nn.Conv2d(1, 40, kernel_size=(1, 25))
@@ -132,7 +132,7 @@ Why it matters: EEGNet is the de facto lightweight baseline in the field — nea
 '''
 
 class EEGNet(nn.Module):
-    def __init__(self, num_temporal_filters = 8, num_spatial_filters = 10):
+    def __init__(self, n_channels, n_classes, n_timepoints, sampling_rate, num_temporal_filters = 8, num_spatial_filters = 10):
         super(EEGNet, self).__init__()
         '''
         C = num channels
@@ -303,7 +303,7 @@ class TCBlock(nn.Module):
         return x
 
 class ATCNet(nn.Module):
-    def __init__(self, num_filters = 16, d = 2, p2 = 8, num_heads=2, block_one_dropout=0.3, attn_drouput=0.5):
+    def __init__(self, n_channels, n_classes, sampling_rate, num_filters = 16, d = 2, p2 = 8, num_heads=2, block_one_dropout=0.3, attn_drouput=0.5):
         super(ATCNet, self).__init__()
         '''
         3 main blocks
@@ -388,7 +388,7 @@ https://pubmed.ncbi.nlm.nih.gov/37015413/
 '''
 
 class PatchEmbedding(nn.Module):
-    def __init__(self, emb_size=40):
+    def __init__(self, n_channels, emb_size=40):
         # self.patch_size = patch_size
         super().__init__()
 
@@ -524,7 +524,7 @@ class ClassificationHead(nn.Sequential):
 
 
 class Conformer(nn.Sequential):
-    def __init__(self, emb_size=40, depth=6, n_classes=4):
+    def __init__(self, n_channels, n_classes, n_timepoints, emb_size=40, depth=6):
 
         _t = n_timepoints - 24                                      # after Conv2d (1,25): 201
         _t = (_t - 75) // 15 + 1                                   # after AvgPool2d (1,75) stride (1,15): 9
@@ -533,7 +533,7 @@ class Conformer(nn.Sequential):
         
         super().__init__(
 
-            PatchEmbedding(emb_size),
+            PatchEmbedding(n_channels, emb_size),
             TransformerEncoder(depth, emb_size),
             ClassificationHead(emb_size, n_classes, fc_input_size)
         )
@@ -559,7 +559,7 @@ Outperforms EEG Conformer by 4.86% and DeepConvNet by 4.74%
 '''
 
 class CTNet(nn.Module):
-    def __init__(self, num_temporal_filters=8, D=2, dropout=0.5, d=16):
+    def __init__(self, n_channels, n_classes, n_timepoints, sampling_rate, num_temporal_filters=8, D=2, dropout=0.5, d=16):
         super(CTNet, self).__init__()
         # F1 = num_temporal_filters, F2 = F1*D after depthwise, d = output dim
         F1 = num_temporal_filters
@@ -704,7 +704,7 @@ class TCN(nn.Module):
 
 class EEGNetBranch(nn.Module):
     """Single EEGNet branch, outputs (B, F2, 1, T//32)."""
-    def __init__(self, F1=8, D=2, dropout=0.5):
+    def __init__(self, n_channels, sampling_rate, F1=8, D=2, dropout=0.5):
         super().__init__()
         F2 = F1 * D
         self.block_one = nn.Sequential(
@@ -732,14 +732,13 @@ class EEGNetBranch(nn.Module):
 
 # ─── MBMANet ─────────────────────────────────────────────────────────────────
 
-_Tprime = n_timepoints // 32   # temporal length after EEGNet branches: 225//32 = 7
-
 class MBMANet(nn.Module):
-    def __init__(self, F1s=(4, 8, 16), D=2, tcn_channels=64, tcn_layers=2, dropout=0.5):
+    def __init__(self, n_channels, n_classes, n_timepoints, sampling_rate, F1s=(4, 8, 16), D=2, tcn_channels=64, tcn_layers=2, dropout=0.5):
         super().__init__()
+        _Tprime = n_timepoints // 32   # temporal length after EEGNet branches: 225//32 = 7
 
         # Module 2: three EEGNet branches with different F1 for diverse features
-        self.branches = nn.ModuleList([EEGNetBranch(F1, D, dropout) for F1 in F1s])
+        self.branches = nn.ModuleList([EEGNetBranch(n_channels, sampling_rate, F1, D, dropout) for F1 in F1s])
         seg_channels   = [F1 * D for F1 in F1s]   # [8, 16, 32]
         total_channels = sum(seg_channels)          # 56
 
@@ -1174,7 +1173,7 @@ class EEGDepthAttention(nn.Module):
 
 
 class LMDANet(nn.Module):
-    def __init__(self, depth=9, kernel=25, channel_depth1=24, channel_depth2=9,
+    def __init__(self, n_channels, n_classes, n_timepoints, depth=9, kernel=25, channel_depth1=24, channel_depth2=9,
                  ave_depth=1, avepool=5, dropout=0.65):
         super(LMDANet, self).__init__()
 
@@ -1323,7 +1322,7 @@ class InceptionBlock(nn.Module):
 
 
 class EEGITNet(nn.Module):
-    def __init__(self, n_inception=2, out_per_branch=8, D=2, tcn_channels=16, tcn_layers=2, dropout=0.5): #can change D to 1 to reduce model size, or halve out_per_branch to 4, try lowering dropout to 0.3 if data accuracy is low
+    def __init__(self, n_channels, n_classes, n_timepoints, n_inception=2, out_per_branch=8, D=2, tcn_channels=16, tcn_layers=2, dropout=0.5): #can change D to 1 to reduce model size, or halve out_per_branch to 4, try lowering dropout to 0.3 if data accuracy is low
         super(EEGITNet, self).__init__()
         inc_ch = out_per_branch * 3   # 24 — output channels of each InceptionBlock
 
