@@ -2,3 +2,15 @@ Driver download:
 1. https://www.silabs.com/software-and-tools/usb-to-uart-bridge-vcp-drivers?tab=downloads
 2. Extract zip folder
 3. find silabser.inf file. Install this
+
+
+Resources:
+https://community.dfrobot.com/makelog-314219.html
+https://docs.circuitpython.org/projects/rplidar/en/latest/
+https://atsushisakai.github.io/PythonRobotics/
+https://petercorke.github.io/robotics-toolbox-python/mobile_planner.html
+https://github.com/simondlevy/BreezySLAM
+https://towardsdatascience.com/indoor-robot-localization-with-slam-f8b447bcb865/
+https://sayantisroboticsblog.blogspot.com/2024/12/diy-lidar-slam-robot-from-scratch.html
+https://medium.com/@pliam1105/building-a-3d-printed-robot-that-uses-slam-for-autonomous-navigation-cd83473dac7c
+https://robotisim.com/ros-2-slam-beginner-guide-floorplan/
