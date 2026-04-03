@@ -145,7 +145,8 @@ def add_fake_jaw_clench(onset: float = 10.0, duration: float = 3.0):
 # =============================================================================
 
 def _get_eeg_channels(raw):
-    return [ch for ch in raw.ch_names if "EEG" in ch]
+    exclude = {'Trigger', 'Event'}
+    return [ch for ch in raw.ch_names if ch not in exclude]
 
 
 def extract_csp(n_components: int = 6):
