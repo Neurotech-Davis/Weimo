@@ -36,134 +36,131 @@ _models_module.n_timepoints  = N_TIMEPOINTS
 from ml_model.models import (
     DeepConvNet, ShallowConvNet, EEGNet, ATCNet,
     MBMANet, LMDANet,
-    InceptionBlock, TCN,            # building blocks reused below
-    ResidualAdd, MultiHeadAttention, FeedForwardBlock,  # reused in CTNet fix
-    # CTNet   — broken: uses wrong TransformerEncoder; replaced below
-    # EEGITNet — broken: forward() cut off in models.py; replaced below
 )
 
 import torch
 import torch.nn as nn
 
-# =============================================================================
-# CTNet: the models file defines TWO TransformerEncoder classes.
-# The one CTNet needs takes (depth, emb_size) but the one resolved at import
-# time is the PBT version which takes (n_blocks, d_model, n_head, ...).
-# We redefine CTNet here using the correct Conformer-style TransformerEncoder.
-# =============================================================================
+# # =============================================================================
+# # CTNet: the models file defines TWO TransformerEncoder classes.
+# # The one CTNet needs takes (depth, emb_size) but the one resolved at import
+# # time is the PBT version which takes (n_blocks, d_model, n_head, ...).
+# # We redefine CTNet here using the correct Conformer-style TransformerEncoder.
+# # =============================================================================
 
-class _ConformerTransformerEncoderBlock(nn.Sequential):
-    def __init__(self, emb_size, num_heads=10, drop_p=0.5,
-                 forward_expansion=4, forward_drop_p=0.5):
-        super().__init__(
-            ResidualAdd(nn.Sequential(
-                nn.LayerNorm(emb_size),
-                MultiHeadAttention(emb_size, num_heads, drop_p),
-                nn.Dropout(drop_p),
-            )),
-            ResidualAdd(nn.Sequential(
-                nn.LayerNorm(emb_size),
-                FeedForwardBlock(emb_size, expansion=forward_expansion,
-                                 drop_p=forward_drop_p),
-                nn.Dropout(drop_p),
-            )),
-        )
+# class _ConformerTransformerEncoderBlock(nn.Sequential):
+#     def __init__(self, emb_size, num_heads=2, drop_p=0.5,
+#                  forward_expansion=4, forward_drop_p=0.5):
+#         # num_heads must divide emb_size evenly; default 2 works for emb_size=16 or 32
+#         super().__init__(
+#             ResidualAdd(nn.Sequential(
+#                 nn.LayerNorm(emb_size),
+#                 MultiHeadAttention(emb_size, num_heads, drop_p),
+#                 nn.Dropout(drop_p),
+#             )),
+#             ResidualAdd(nn.Sequential(
+#                 nn.LayerNorm(emb_size),
+#                 FeedForwardBlock(emb_size, expansion=forward_expansion,
+#                                  drop_p=forward_drop_p),
+#                 nn.Dropout(drop_p),
+#             )),
+#         )
 
-class _ConformerTransformerEncoder(nn.Sequential):
-    def __init__(self, depth, emb_size):
-        super().__init__(
-            *[_ConformerTransformerEncoderBlock(emb_size) for _ in range(depth)]
-        )
+# class _ConformerTransformerEncoder(nn.Sequential):
+#     def __init__(self, depth, emb_size):
+#         super().__init__(
+#             *[_ConformerTransformerEncoderBlock(emb_size) for _ in range(depth)]
+#         )
 
-class CTNet(nn.Module):
-    def __init__(self, num_temporal_filters=8, D=2, dropout=0.5, d=16):
-        super().__init__()
-        F1  = num_temporal_filters
-        F1D = F1 * D
-        _t  = N_TIMEPOINTS
-        _t  = _t - (SFREQ // 4) + 1   # after temporal conv (no padding)
-        _t  = _t // 4                  # after AvgPool(1,4)
-        _t  = _t - 16 + 1              # after spatial conv (1,16)
-        Tc  = _t // 2                  # after AvgPool(1,2)
+# class CTNet(nn.Module):
+#     def __init__(self, num_temporal_filters=8, D=2, dropout=0.5, d=16):
+#         super().__init__()
+#         F1  = num_temporal_filters
+#         F1D = F1 * D
+#         _t  = N_TIMEPOINTS
+#         _t  = _t - (SFREQ // 4) + 1   # after temporal conv (no padding)
+#         _t  = _t // 4                  # after AvgPool(1,4)
+#         _t  = _t - 16 + 1              # after spatial conv (1,16)
+#         Tc  = _t // 2                  # after AvgPool(1,2)
 
-        self.conv_layer = nn.Sequential(
-            nn.Conv2d(1, F1, kernel_size=(1, SFREQ // 4), padding='same', bias=False),
-            nn.BatchNorm2d(F1),
-            nn.Conv2d(F1, F1D, kernel_size=(N_CHANNELS, 1), groups=F1, bias=False),
-            nn.BatchNorm2d(F1D),
-            nn.ELU(inplace=True),
-            nn.AvgPool2d(kernel_size=(1, 4)),
-            nn.Dropout(p=dropout),
-            nn.Conv2d(F1D, d, kernel_size=(1, 16), bias=False),
-            nn.BatchNorm2d(d),
-            nn.ELU(inplace=True),
-            nn.AvgPool2d(kernel_size=(1, 2)),
-            nn.Dropout(p=dropout),
-        )
-        self.transformer = _ConformerTransformerEncoder(depth=6, emb_size=d)
-        self.classifier  = nn.Sequential(
-            nn.Dropout(p=0.5),
-            nn.Linear(d * Tc, N_CLASSES),
-        )
+#         self.conv_layer = nn.Sequential(
+#             nn.Conv2d(1, F1, kernel_size=(1, SFREQ // 4), padding='same', bias=False),
+#             nn.BatchNorm2d(F1),
+#             nn.Conv2d(F1, F1D, kernel_size=(N_CHANNELS, 1), groups=F1, bias=False),
+#             nn.BatchNorm2d(F1D),
+#             nn.ELU(inplace=True),
+#             nn.AvgPool2d(kernel_size=(1, 4)),
+#             nn.Dropout(p=dropout),
+#             nn.Conv2d(F1D, d, kernel_size=(1, 16), bias=False),
+#             nn.BatchNorm2d(d),
+#             nn.ELU(inplace=True),
+#             nn.AvgPool2d(kernel_size=(1, 2)),
+#             nn.Dropout(p=dropout),
+#         )
+#         self.transformer = _ConformerTransformerEncoder(depth=6, emb_size=d)
+#         self.classifier  = nn.Sequential(
+#             nn.Dropout(p=0.5),
+#             nn.Linear(d * Tc, N_CLASSES),
+#         )
 
-    def forward(self, x):
-        x        = self.conv_layer(x)
-        cnn_out  = x.squeeze(2).permute(0, 2, 1)
-        trans_out = self.transformer(cnn_out)
-        x = (cnn_out + trans_out).flatten(1)
-        return self.classifier(x)
+#     def forward(self, x):
+#         x        = self.conv_layer(x)
+#         cnn_out  = x.squeeze(2).permute(0, 2, 1)
+#         trans_out = self.transformer(cnn_out)
+#         x = (cnn_out + trans_out).flatten(1)
+#         return self.classifier(x)
 
 
-# =============================================================================
-# EEGITNet: forward() is missing from models.py (document was cut off).
-# Reconstructed from the architecture description in the file.
-# =============================================================================
+# # =============================================================================
+# # EEGITNet: forward() is missing from models.py (document was cut off).
+# # Reconstructed from the architecture description in the file.
+# # =============================================================================
 
-class EEGITNet(nn.Module):
-    def __init__(self, n_inception=2, out_per_branch=8, D=2,
-                 tcn_channels=16, tcn_layers=2, dropout=0.5):
-        super().__init__()
-        inc_ch = out_per_branch * 3
+# class EEGITNet(nn.Module):
+#     def __init__(self, n_inception=2, out_per_branch=8, D=2,
+#                  tcn_channels=16, tcn_layers=2, dropout=0.5):
+#         super().__init__()
+#         inc_ch = out_per_branch * 3
 
-        blocks = [InceptionBlock(1, out_per_branch)]
-        for _ in range(n_inception - 1):
-            blocks.append(InceptionBlock(inc_ch, out_per_branch))
-        self.inception = nn.Sequential(*blocks)
+#         blocks = [InceptionBlock(1, out_per_branch)]
+#         for _ in range(n_inception - 1):
+#             blocks.append(InceptionBlock(inc_ch, out_per_branch))
+#         self.inception = nn.Sequential(*blocks)
 
-        self.spatial = nn.Sequential(
-            nn.Conv2d(inc_ch, inc_ch * D, kernel_size=(N_CHANNELS, 1),
-                      groups=inc_ch, bias=False),
-            nn.BatchNorm2d(inc_ch * D),
-            nn.ELU(inplace=True),
-            nn.AvgPool2d(kernel_size=(1, 4)),
-            nn.Dropout(p=dropout),
-        )
+#         self.spatial = nn.Sequential(
+#             nn.Conv2d(inc_ch, inc_ch * D, kernel_size=(N_CHANNELS, 1),
+#                       groups=inc_ch, bias=False),
+#             nn.BatchNorm2d(inc_ch * D),
+#             nn.ELU(inplace=True),
+#             nn.AvgPool2d(kernel_size=(1, 4)),
+#             nn.Dropout(p=dropout),
+#         )
 
-        sep_ch = inc_ch * D
-        self.temporal = nn.Sequential(
-            nn.Conv2d(sep_ch, sep_ch, kernel_size=(1, 16), groups=sep_ch,
-                      padding='same', bias=False),
-            nn.Conv2d(sep_ch, sep_ch, kernel_size=(1, 1), bias=False),
-            nn.BatchNorm2d(sep_ch),
-            nn.ELU(inplace=True),
-            nn.AvgPool2d(kernel_size=(1, 8)),
-            nn.Dropout(p=dropout),
-        )
+#         sep_ch = inc_ch * D
+#         self.temporal = nn.Sequential(
+#             nn.Conv2d(sep_ch, sep_ch, kernel_size=(1, 16), groups=sep_ch,
+#                       padding='same', bias=False),
+#             nn.Conv2d(sep_ch, sep_ch, kernel_size=(1, 1), bias=False),
+#             nn.BatchNorm2d(sep_ch),
+#             nn.ELU(inplace=True),
+#             nn.AvgPool2d(kernel_size=(1, 8)),
+#             nn.Dropout(p=dropout),
+#         )
 
-        Tc = N_TIMEPOINTS // 32
-        self.tcn        = TCN(sep_ch, tcn_channels, n_layers=tcn_layers, dropout=dropout)
-        self.classifier = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(tcn_channels * Tc, N_CLASSES),
-        )
+#         Tc = N_TIMEPOINTS // 32
+#         self.tcn        = TCN(sep_ch, tcn_channels, n_layers=tcn_layers, dropout=dropout)
+#         self.classifier = nn.Sequential(
+#             nn.Flatten(),
+#             nn.Linear(tcn_channels * Tc, N_CLASSES),
+#         )
 
-    def forward(self, x):
-        x = self.inception(x)   # (B, inc_ch, N_CHANNELS, T)
-        x = self.spatial(x)     # (B, inc_ch*D, 1, T//4)
-        x = self.temporal(x)    # (B, sep_ch, 1, T//32)
-        x = x.squeeze(2)        # (B, sep_ch, T//32)
-        x = self.tcn(x)         # (B, tcn_channels, T//32)
-        return self.classifier(x)
+#     def forward(self, x):
+#         x = self.inception(x)   # (B, inc_ch, N_CHANNELS, T)
+#         x = self.spatial(x)     # (B, inc_ch*D, 1, T//4)
+#         x = self.temporal(x)    # (B, sep_ch, 1, T//32)
+#         x = x.squeeze(2)        # (B, sep_ch, T//32)
+#         x = self.tcn(x)         # (B, tcn_channels, T//32)
+#         return self.classifier(x)
 
 
 # =============================================================================
@@ -197,7 +194,7 @@ BANDPASS_CONFIGS = [
     [(4, 8), (8, 13), (13, 30)],
 ]
 
-EPOCHS     = 30
+EPOCHS     = 100
 BATCH_SIZE = 32
 LR         = 1e-3
 CV_FOLDS   = 5
@@ -220,28 +217,35 @@ def make_model_grid():
 
     for f1, d in itertools.product([8, 16], [2]):
         _f1, _d = f1, d
-        grid.append(('EEGNet', {'F1': _f1, 'D': _d},
-            lambda f=_f1, d=_d: EEGNet(num_temporal_filters=f, num_spatial_filters=d)))
+        # EEGNet.forward() calls unsqueeze(1) expecting (B, C, T) input, but
+        # extract_tensor returns (B, 1, C, T). Squeeze the leading 1 before forward.
+        class _EEGNetWrapper(nn.Module):
+            def __init__(self, f=_f1, d=_d):
+                super().__init__()
+                self.model = EEGNet(num_temporal_filters=f, num_spatial_filters=d)
+            def forward(self, x):
+                return self.model(x.squeeze(1))  # (B,1,C,T) -> (B,C,T)
+        grid.append(('EEGNet', {'F1': _f1, 'D': _d}, _EEGNetWrapper))
 
     for nf, heads in itertools.product([16, 32], [2]):
         _nf, _h = nf, heads
         grid.append(('ATCNet', {'num_filters': _nf, 'num_heads': _h},
             lambda nf=_nf, h=_h: ATCNet(num_filters=nf, num_heads=h)))
 
-    for f1, dropout in itertools.product([8, 16], [0.3, 0.5]):
-        _f1, _dr = f1, dropout
-        grid.append(('CTNet', {'F1': _f1, 'dropout': _dr},
-            lambda f=_f1, dr=_dr: CTNet(num_temporal_filters=f, dropout=dr)))
+    # for f1, dropout in itertools.product([8, 16], [0.3, 0.5]):
+    #     _f1, _dr = f1, dropout
+    #     grid.append(('CTNet', {'F1': _f1, 'dropout': _dr},
+    #         lambda f=_f1, dr=_dr: CTNet(num_temporal_filters=f, dropout=dr)))
 
     for depth, kernel in itertools.product([9], [25, 51]):
         _depth, _kernel = depth, kernel
         grid.append(('LMDANet', {'depth': _depth, 'kernel': _kernel},
             lambda dep=_depth, k=_kernel: LMDANet(depth=dep, kernel=k)))
 
-    for n_inc, dropout in itertools.product([2, 3], [0.3, 0.5]):
-        _ni, _dr = n_inc, dropout
-        grid.append(('EEGITNet', {'n_inception': _ni, 'dropout': _dr},
-            lambda ni=_ni, dr=_dr: EEGITNet(n_inception=ni, dropout=dr)))
+    # for n_inc, dropout in itertools.product([2, 3], [0.3, 0.5]):
+    #     _ni, _dr = n_inc, dropout
+    #     grid.append(('EEGITNet', {'n_inception': _ni, 'dropout': _dr},
+    #         lambda ni=_ni, dr=_dr: EEGITNet(n_inception=ni, dropout=dr)))
 
     grid.append(('MBMANet', {}, lambda: MBMANet()))
 
