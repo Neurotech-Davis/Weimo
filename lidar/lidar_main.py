@@ -1,13 +1,13 @@
 import math
 import pygame
 import time
-from pyrplidar import PyRPlidar
+from rplidar import RPLidar, RPLidarException
 
 # Screen setup
 WIDTH, HEIGHT = 800, 800
 CENTER = (WIDTH // 2, HEIGHT // 2)
 MIN_DISTANCE = 50     # mm (5 cm)
-MAX_DISTANCE = 3000   # mm (300 cm)
+MAX_DISTANCE = 10000   # mm (300 cm)
 SCALE = (WIDTH // 2) / MAX_DISTANCE
 
 # Colors
@@ -34,70 +34,70 @@ def lidar_graphing():
     font_small = pygame.font.SysFont(None, 20)
     font_title = pygame.font.SysFont(None, 28, bold=True)
 
-    # Following is all according to documentation
-    lidar = PyRPlidar()
+    # The following is all according to documentation
     PORT = "COM3"
     BAUD = 115200
-    lidar.connect(PORT, BAUD, timeout=3)
-    lidar.set_motor_pwm(500)
-    time.sleep(2)
-    scan_generator = lidar.force_scan()
+    lidar = RPLidar(PORT, baudrate=BAUD, timeout=1)
+    lidar.start_motor()
+    time.sleep(0.2)
 
     running = True
 
     try:
-        points = []
-        prev_angle = None
-
-        for scan in scan_generator():
+        for scan in lidar.iter_scans(max_buf_meas=500, min_len=3):
             for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    running = False
+                    if event.type == pygame.QUIT:
+                        running = False
+            if not running:
+                break
 
-            if MIN_DISTANCE <= scan.distance <= MAX_DISTANCE:
-                points.append((scan.angle, scan.distance))
+            screen.fill(BLACK)
 
-            # Detect sweep completion
-            if prev_angle is not None and scan.angle < prev_angle:
-                # Clear screen
-                screen.fill(BLACK)
-
-                # Draw reference circles + labels
-                for r in range(500, MAX_DISTANCE + 1, 500):  # every 50 cm
-                    pygame.draw.circle(screen, DARK_GREEN, CENTER, int(r * SCALE), 1)
-                    label = font_small.render(f"{r//10} cm", True, WHITE)  # mm → cm
-                    screen.blit(label, (CENTER[0] + int(r * SCALE) - 25, CENTER[1]))
-
-                # Draw all points with distance-based colors
-                for ang, dist in points:
+            for r in range(500, MAX_DISTANCE + 1, 500):
+                pygame.draw.circle(screen, DARK_GREEN, CENTER, int(r * SCALE), 1)
+                label = font_small.render(f"{r // 10} cm", True, WHITE)
+                screen.blit(label, (CENTER[0] + int(r * SCALE) - 25, CENTER[1]))
+                
+            for quality, ang, dist in scan:
+                if MIN_DISTANCE <= dist <= MAX_DISTANCE:
                     px, py = polar_to_cartesian(ang, dist)
-                    if dist <= 1000:       # 0.05–1.0 m
+
+                    if dist <= 1000:    # Within 1 meter
                         color = RED
-                    elif dist <= 2000:     # 1.0–2.0 m
+                    elif dist <= 2000:  # Within 2 meters
                         color = YELLOW
-                    else:                  # 2.0–3.0 m
+                    else:
                         color = GREEN
-                    pygame.draw.circle(screen, color, (px, py), 2)
 
-                # Draw title text at bottom
-                title_surface = font_title.render("Sparklers Lidar Radar System", True, WHITE)
-                screen.blit(title_surface, (WIDTH // 2 - title_surface.get_width() // 2, HEIGHT - 40))
+                    pygame.draw.circle(screen, color, (px,py), 2)
+            title_surface = font_title.render("Lidar Graphing", True, WHITE)
+            screen.blit(title_surface, (WIDTH // 2 - title_surface.get_width() // 2, HEIGHT - 40))
 
-                pygame.display.flip()
-                clock.tick(60)
-                points.clear()
-
-            prev_angle = scan.angle
+            pygame.display.flip()
+            clock.tick(30)
 
             if not running:
                 break
 
     except KeyboardInterrupt:
         print("\nStopped")
+
     finally:
-        lidar.stop()
-        lidar.set_motor_pwm(0)
-        lidar.disconnect()
+        try:
+            lidar.stop()
+        except Exception:
+            pass
+
+        try:
+            lidar.stop_motor()
+        except Exception:
+            pass
+
+        try:
+            lidar.disconnect()
+        except Exception:
+            pass
+
         pygame.quit()
 
 if __name__ == "__main__":

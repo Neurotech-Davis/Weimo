@@ -1,4 +1,4 @@
-from pyrplidar import RPLidar, RPLidarException
+from rplidar import RPLidar, RPLidarException
 import serial
 import time
 
