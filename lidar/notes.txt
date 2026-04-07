@@ -2,3 +2,32 @@ Driver download:
 1. https://www.silabs.com/software-and-tools/usb-to-uart-bridge-vcp-drivers?tab=downloads
 2. Extract zip folder
 3. find silabser.inf file. Install this
+
+
+Resources:
+1. https://community.dfrobot.com/makelog-314219.html
+   DFRobot RPLidar + matplotlib — visualizing live scan data as a polar plot. Directly applicable to where you are right now.
+
+2. https://docs.circuitpython.org/projects/rplidar/en/latest/
+   Adafruit CircuitPython RPLidar — clean minimal examples for reading scan data into a simple 360-element array. Good reference for structuring your data before feeding it into anything else.
+
+3. https://atsushisakai.github.io/PythonRobotics/
+   PythonRobotics — runnable Python implementations of every major robotics algorithm: lidar-to-grid mapping, A*, particle filters, SLAM, and more. Use this as a sandbox to understand each piece before integrating them.
+
+4. https://petercorke.github.io/robotics-toolbox-python/mobile_planner.html
+   Robotics Toolbox for Python — higher-level library built on top of the concepts from PythonRobotics. Good for actually running A* on an occupancy grid with obstacle inflation without writing it from scratch.
+
+5. https://sayantisroboticsblog.blogspot.com/2024/12/diy-lidar-slam-robot-from-scratch.html
+   DIY LIDAR SLAM from Scratch (2024) — a team that built the full pipeline in pure Python with no ROS. Read this to understand what SLAM is actually doing internally before using a library to do it for you.
+
+6. https://github.com/simondlevy/BreezySLAM
+   BreezySLAM — the simplest Python SLAM library to get working with your RPLidar. Has an rpslam.py example written specifically for the A1.
+
+7. https://towardsdatascience.com/indoor-robot-localization-with-slam-f8b447bcb865/
+   Towards Data Science: Indoor SLAM on RPi — practical deployment of BreezySLAM on real hardware with real-time visualization. Read after you have BreezySLAM working on your machine.
+
+8. https://medium.com/@pliam1105/building-a-3d-printed-robot-that-uses-slam-for-autonomous-navigation-cd83473dac7c
+   Medium: 3D-printed robot with ROS 2 + SLAM (2024) — end-to-end robot build using ROS 2, slam_toolbox, and RPLidar. Only relevant once you're ready to move to ROS.
+
+9. https://robotisim.com/ros-2-slam-beginner-guide-floorplan/
+   ROS 2 SLAM Beginner Guide — structured walkthrough of the full ROS 2 nav stack: LiDAR → occupancy grid → SLAM Toolbox → Nav2 autonomous navigation. The final destination if you want a production-ready system.

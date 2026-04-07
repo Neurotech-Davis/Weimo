@@ -15,7 +15,7 @@ def notch(freq: float = 60.0):
     def apply(raw: mne.io.Raw) -> mne.io.Raw:
         raw.notch_filter(freq)
         return raw
-    apply.__repr__ = lambda: f"notch(freq={freq})"
+    apply._desc = f"notch(freq={freq})"
     return apply
 
 
@@ -27,7 +27,7 @@ def bandpass(bands: list[tuple]):
             filtered.filter(l_freq=low_cut, h_freq=high_cut)
             raw._band_data[(low_cut, high_cut)] = filtered
         return raw
-    apply.__repr__ = lambda: f"bandpass(bands={bands})"
+    apply._desc = f"bandpass(bands={bands})"
     return apply
 
 
@@ -35,7 +35,7 @@ def rereference(ref: str = "average"):
     def apply(raw: mne.io.Raw) -> mne.io.Raw:
         raw.set_eeg_reference(ref_channels=ref, projection=False)
         return raw
-    apply.__repr__ = lambda: f"rereference(ref={ref!r})"
+    apply._desc = f"rereference(ref={ref!r})"
     return apply
 
 
@@ -54,7 +54,7 @@ def epoch(tmin: float = 0.0, tmax: float = 3.0,
         raw._event_id = selected_ids  # store for remapping later
         print(f"Epoched: {len(raw._epochs)} trials  |  classes: {list(selected_ids.keys())}")
         return raw
-    apply.__repr__ = lambda: f"epoch(tmin={tmin}, tmax={tmax})"
+    apply._desc = f"epoch(tmin={tmin}, tmax={tmax})"
     return apply
 
 
@@ -102,7 +102,7 @@ def add_idle_class(window_dur: float = 3.0, idle_start_min: float = 1.0, label: 
         print(f"[idle] Added {len(idle_onsets)} idle windows  |  label: '{label}'")
         return raw
 
-    apply.__repr__ = lambda: f"add_idle_class(window_dur={window_dur}, idle_start_min={idle_start_min})"
+    apply._desc = f"add_idle_class(window_dur={window_dur}, idle_start_min={idle_start_min})"
     return apply
 
 
@@ -124,16 +124,29 @@ def plot_psd(title: str = "PSD", fmin: float = 0.1, fmax: float = 150.0):
         plt.tight_layout()
         plt.show()
         return raw
-    apply.__repr__ = lambda: f"plot_psd(title={title!r})"
+    apply._desc = f"plot_psd(title={title!r})"
     return apply
 
+def add_fake_jaw_clench(onset: float = 10.0, duration: float = 3.0):
+    def apply(raw):
+        fake = mne.Annotations(
+            onset=[onset],
+            duration=[duration],
+            description=['jaw_clench'],
+            orig_time=raw.annotations.orig_time  # match existing orig_time
+        )
+        raw.set_annotations(raw.annotations + fake)
+        return raw
+    apply._desc = f"add_fake_jaw_clench(onset={onset}, duration={duration})"
+    return apply
 
 # =============================================================================
 # Feature extractors — take a processed Raw, return (X, y)
 # =============================================================================
 
 def _get_eeg_channels(raw):
-    return [ch for ch in raw.ch_names if "EEG" in ch]
+    exclude = {'Trigger', 'Event'}
+    return [ch for ch in raw.ch_names if ch not in exclude]
 
 
 def extract_csp(n_components: int = 6):
@@ -164,7 +177,7 @@ def extract_csp(n_components: int = 6):
 
         print(f"[CSP] shape: {X.shape}")
         return X, y
-    extract.__repr__ = lambda: f"extract_csp(n_components={n_components})"
+    extract._desc = f"extract_csp(n_components={n_components})"
     return extract
 
 
@@ -181,7 +194,7 @@ def extract_tensor(scale: bool = True):
         X = X[:, np.newaxis, :, :].astype(np.float32)
         print(f"[Tensor] shape: {X.shape}")
         return X, y
-    extract.__repr__ = lambda: f"extract_tensor(scale={scale})"
+    extract._desc = f"extract_tensor(scale={scale})"
     return extract
 
 
@@ -199,7 +212,7 @@ def extract_cwt(freqs: np.ndarray = None, n_cycles: float = 6.0):
         ).astype(np.float32)
         print(f"[CWT] shape: {X_cwt.shape}")
         return X_cwt, y
-    extract.__repr__ = lambda: f"extract_cwt(n_cycles={n_cycles})"
+    extract._desc = f"extract_cwt(n_cycles={n_cycles})"
     return extract
 
 
@@ -233,7 +246,7 @@ def extract_bandpower(bands: dict = None):
         X = np.array(features, dtype=np.float32)
         print(f"[Bandpower] shape: {X.shape}  bands: {list(_bands.keys())}")
         return X, y
-    extract.__repr__ = lambda: f"extract_bandpower(bands={list(_bands.keys())})"
+    extract._desc = f"extract_bandpower(bands={list(_bands.keys())})"
     return extract
 
 def extract_pca(n_components: int = 10):
@@ -258,7 +271,18 @@ def extract_pca(n_components: int = 10):
         print(f"[PCA] shape: {X_pca.shape}  |  variance explained: {explained:.2%}")
         return X_pca, y
 
-    extract.__repr__ = lambda: f"extract_pca(n_components={n_components})"
+    extract._desc = f"extract_pca(n_components={n_components})"
+    return extract
+
+def extract_raw():
+    def extract(raw: mne.io.Raw):
+        assert hasattr(raw, '_epochs'), "Add epoch() to the pipeline before extracting features."
+        eeg_channels = _get_eeg_channels(raw)
+        X = raw._epochs.get_data(picks=eeg_channels).astype(np.float32)
+        y = raw._epochs.events[:, 2]
+        print(f"[Raw] shape: {X.shape}")
+        return X, y
+    extract._desc = "extract_raw()"
     return extract
 
 # =============================================================================
@@ -289,7 +313,7 @@ class MNEPipeline:
         return raw
 
     def to_dict(self):
-        return {'steps': [repr(s) for s in self.steps]}
+        return {'steps': [getattr(s, '_desc', repr(s)) for s in self.steps]}
 
 
 # =============================================================================
@@ -297,12 +321,17 @@ class MNEPipeline:
 # =============================================================================
 
 if __name__ == "__main__":
+    # parameters and file paths here
     files = [
         './data_collection/annotated_eeg/chengyi0210.fif',
         './data_collection/annotated_eeg/pilapil0226.fif',
     ]
-    save_dir = ''
+    save_dir = './data_collection/preprocessed_data'
+    preprocessed_data_filename = 'chengyi.npz'
     label_map = {'idle': 0, 'move': 1, 'jaw_clench': 2}
+    
+    # define the extractor once so its repr can be captured in the config
+    extractor = extract_raw()
 
     all_X, all_y = [], []
 
@@ -311,13 +340,15 @@ if __name__ == "__main__":
         pipeline.add(notch(60))
         pipeline.add(bandpass([(8, 13), (13, 30)]))
         pipeline.add(rereference())
+        # always add this add idle class and the epoch class
         pipeline.add(add_idle_class(window_dur=3.0, idle_start_min=1.0))
+        pipeline.add(add_fake_jaw_clench())
         pipeline.add(epoch(tmin=0, tmax=3))
         pipeline.describe()
 
         # run without extractor to keep the raw object (for event_id access)
         raw_processed = pipeline.run()
-        X, y = extract_csp(n_components=6)(raw_processed)
+        X, y = extractor(raw_processed)
 
         # remap MNE's auto-assigned ids to consistent 0/1/2 labels
         auto_ids = raw_processed._event_id  # e.g. {'idle': 1, 'jaw_clench': 2, 'move': 3}
@@ -332,7 +363,7 @@ if __name__ == "__main__":
     y = np.concatenate(all_y, axis=0)
     print(f"Total: {X.shape}, labels: {np.unique(y)}")
 
-    save_path = os.path.join(save_dir, 'dataset.npz') if save_dir else 'dataset.npz'
+    save_path = os.path.join(save_dir, preprocessed_data_filename) if save_dir else 'dataset.npz'
     np.savez(save_path, X=X, y=y)
     print(f"Saved {X.shape[0]} trials to {save_path}")
 
@@ -342,6 +373,7 @@ if __name__ == "__main__":
         'X_shape': list(X.shape),
         'y_shape': list(y.shape),
         'pipeline': pipeline.to_dict()['steps'],
+        'extractor': getattr(extractor, '_desc', repr(extractor)),
     }
     config_path = save_path.replace('.npz', '_config.json')
     with open(config_path, 'w') as f:

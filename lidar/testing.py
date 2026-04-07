@@ -8,12 +8,14 @@ BAUD = 115200
 lidar = RPLidar(PORT, baudrate=BAUD, timeout=1)
 
 try:
-    lidar.start_motor()
-    time.sleep(0.2)
+    lidar.start_motor() # starts motor
+    time.sleep(0.2) # sleep for .2 seconds to warm up motor
 
-    
+    # iter_scans() gets a one full 360 sweep 
     for idx, scan in enumerate(lidar.iter_scans(max_buf_meas=100, min_len=5)):
-        # scan is a list of (quality, angle, distance)
+        # max_buf_meas limits the measurements to 100 to prevent overflow
+        # min_len=5 discards any sweep with less than 5 valid points
+        # scan is a tuple of (quality, angle, distance)
         if idx == 0:
             print('index 0')
             s = scan

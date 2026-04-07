@@ -11,6 +11,8 @@ __pycache__/
 *.edf
 *.dsi
 *.fif
+*.json
+*.npz
 
 # stores info about the psychopy runs
 /data_collection/data

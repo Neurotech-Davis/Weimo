@@ -7,8 +7,8 @@ from einops import rearrange, reduce, repeat
 from einops.layers.torch import Rearrange, Reduce
 import math
 
-n_channels = 10
-n_classes = 2
+n_channels = 7
+n_classes = 3
 sampling_rate = 50
 trial_duration = 4.5
 n_timepoints = int(sampling_rate * trial_duration)
@@ -31,7 +31,7 @@ Results on BCI IV-2a (4-class): ShallowConvNet ~75–76% accuracy; DeepConvNet s
 '''
 
 class DeepConvNet(nn.Module):
-    def __init__(self):
+    def __init__(self, n_channels, n_classes):
         super(DeepConvNet, self).__init__()
 
         self.max_pool = nn.MaxPool2d(kernel_size=(1,3), stride=(1,3))
@@ -89,7 +89,7 @@ class DeepConvNet(nn.Module):
         return x
     
 class ShallowConvNet(nn.Module):
-    def __init__(self, n_channels=22, n_classes=4):
+    def __init__(self, n_channels, n_classes):
         super(ShallowConvNet, self).__init__()
 
         self.temporal_conv = nn.Conv2d(1, 40, kernel_size=(1, 25))
@@ -132,7 +132,7 @@ Why it matters: EEGNet is the de facto lightweight baseline in the field — nea
 '''
 
 class EEGNet(nn.Module):
-    def __init__(self, num_temporal_filters = 8, num_spatial_filters = 10):
+    def __init__(self, n_channels, n_classes, n_timepoints, sampling_rate, num_temporal_filters = 8, num_spatial_filters = 10):
         super(EEGNet, self).__init__()
         '''
         C = num channels
@@ -195,7 +195,6 @@ class EEGNet(nn.Module):
         )
     
     def forward(self, x):
-        x = x.unsqueeze(1) # (B, C, T) -> (B, 1, C, T)
         x = self.block_one(x)
         x = self.block_two(x)
         x = self.classification(x)
@@ -304,7 +303,7 @@ class TCBlock(nn.Module):
         return x
 
 class ATCNet(nn.Module):
-    def __init__(self, num_filters = 16, d = 2, p2 = 8, num_heads=2, block_one_dropout=0.3, attn_drouput=0.5):
+    def __init__(self, n_channels, n_classes, sampling_rate, num_filters = 16, d = 2, p2 = 8, num_heads=2, block_one_dropout=0.3, attn_drouput=0.5):
         super(ATCNet, self).__init__()
         '''
         3 main blocks
@@ -389,7 +388,7 @@ https://pubmed.ncbi.nlm.nih.gov/37015413/
 '''
 
 class PatchEmbedding(nn.Module):
-    def __init__(self, emb_size=40):
+    def __init__(self, n_channels, emb_size=40):
         # self.patch_size = patch_size
         super().__init__()
 
@@ -525,7 +524,7 @@ class ClassificationHead(nn.Sequential):
 
 
 class Conformer(nn.Sequential):
-    def __init__(self, emb_size=40, depth=6, n_classes=4):
+    def __init__(self, n_channels, n_classes, n_timepoints, emb_size=40, depth=6):
 
         _t = n_timepoints - 24                                      # after Conv2d (1,25): 201
         _t = (_t - 75) // 15 + 1                                   # after AvgPool2d (1,75) stride (1,15): 9
@@ -534,7 +533,7 @@ class Conformer(nn.Sequential):
         
         super().__init__(
 
-            PatchEmbedding(emb_size),
+            PatchEmbedding(n_channels, emb_size),
             TransformerEncoder(depth, emb_size),
             ClassificationHead(emb_size, n_classes, fc_input_size)
         )
@@ -560,7 +559,7 @@ Outperforms EEG Conformer by 4.86% and DeepConvNet by 4.74%
 '''
 
 class CTNet(nn.Module):
-    def __init__(self, num_temporal_filters=8, D=2, dropout=0.5, d=16):
+    def __init__(self, n_channels, n_classes, n_timepoints, sampling_rate, num_temporal_filters=8, D=2, dropout=0.5, d=16):
         super(CTNet, self).__init__()
         # F1 = num_temporal_filters, F2 = F1*D after depthwise, d = output dim
         F1 = num_temporal_filters
@@ -705,7 +704,7 @@ class TCN(nn.Module):
 
 class EEGNetBranch(nn.Module):
     """Single EEGNet branch, outputs (B, F2, 1, T//32)."""
-    def __init__(self, F1=8, D=2, dropout=0.5):
+    def __init__(self, n_channels, sampling_rate, F1=8, D=2, dropout=0.5):
         super().__init__()
         F2 = F1 * D
         self.block_one = nn.Sequential(
@@ -733,14 +732,13 @@ class EEGNetBranch(nn.Module):
 
 # ─── MBMANet ─────────────────────────────────────────────────────────────────
 
-_Tprime = n_timepoints // 32   # temporal length after EEGNet branches: 225//32 = 7
-
 class MBMANet(nn.Module):
-    def __init__(self, F1s=(4, 8, 16), D=2, tcn_channels=64, tcn_layers=2, dropout=0.5):
+    def __init__(self, n_channels, n_classes, n_timepoints, sampling_rate, F1s=(4, 8, 16), D=2, tcn_channels=64, tcn_layers=2, dropout=0.5):
         super().__init__()
+        _Tprime = n_timepoints // 32   # temporal length after EEGNet branches: 225//32 = 7
 
         # Module 2: three EEGNet branches with different F1 for diverse features
-        self.branches = nn.ModuleList([EEGNetBranch(F1, D, dropout) for F1 in F1s])
+        self.branches = nn.ModuleList([EEGNetBranch(n_channels, sampling_rate, F1, D, dropout) for F1 in F1s])
         seg_channels   = [F1 * D for F1 in F1s]   # [8, 16, 32]
         total_channels = sum(seg_channels)          # 56
 
@@ -1103,3 +1101,264 @@ class PBT(nn.Module):
                     self.cls_head(transformer_out[torch.where(pos == 0)[0]]),
                     None,
                 )
+'''
+LMDA and ITNet not currently built for real time or jaw clenches 
+LMDA-Net — Miao et al. (2023)
+Source: Neural Networks, 163, 107079 (2023)
+Architecture: Lightweight Multi-Dimensional Attention network. Three key components:
+
+    Channel weight: A learnable parameter of shape (depth, 1, C) applied via einsum
+        before any convolution. Projects the single EEG input into `depth` learned
+        spatial combinations simultaneously — equivalent to depth parallel spatial filters.
+
+    EEGDepthAttention: Applied after the temporal conv. Globally average-pools across
+        channels, transposes the filter/channel axes, runs a 1D conv with a learnable
+        kernel size k, softmaxes across the filter dimension, then multiplies back.
+        This learns which temporal filters (depth dimension) are most task-relevant at
+        each time point — attending over filter depth, not over time or electrodes.
+
+    time_conv: Two-stage temporal processing.
+        (1,1) pointwise conv mixes across depth channels.
+        (1,kernel) depthwise temporal conv extracts frequency-band features per channel.
+
+    chanel_conv: Two-stage spatial processing.
+        (1,1) pointwise reduces depth.
+        (C,1) depthwise collapses the electrode dimension.
+
+    norm: AvgPool3d over the time axis + Dropout.
+
+    Classifier input size is computed dynamically via a dummy forward pass in __init__,
+    making the model robust to any combination of chans/samples/kernel/avepool.
+
+Hyperparameter adaptation for this experiment (10 ch, 225 samples, 50 Hz, 2 class):
+    kernel=25  (half-second temporal filter; original uses 75 at 250 Hz, same duration)
+    channel_depth1=24, channel_depth2=9  (unchanged from paper)
+    depth=9, avepool=5                   (unchanged from paper)
+
+Results on BCI IV-2a (22 channels, 4 class): ~85.6% subject-specific.
+Preprocessing: none — channel weight matrix handles spatial filtering end-to-end.
+'''
+
+class EEGDepthAttention(nn.Module):
+    '''
+    Depth attention over the filter dimension of the temporal conv output.
+
+    W: number of time samples entering this module (after time_conv, not raw input)
+    C: number of filters (channel_depth1) — the dimension being attended over
+    k: conv kernel size along the filter axis; must be odd for symmetric padding
+
+    Forward pass:
+        adaptive_pool collapses the electrode axis to 1, keeping W time steps.
+        transpose swaps the filter (C) and electrode (1) axes so conv slides over filters.
+        conv + softmax produce a (B, 1, C, W) attention map summing to 1 across C.
+        transpose back, then multiply by C * x — scaling by C keeps gradient magnitudes
+        stable regardless of how many filters compete in the softmax.
+    '''
+    def __init__(self, W, C, k=7):
+        super(EEGDepthAttention, self).__init__()
+        self.C = C
+        self.adaptive_pool = nn.AdaptiveAvgPool2d((1, W))
+        # slides along the filter dimension (k filters at a time) at each time step
+        self.conv = nn.Conv2d(1, 1, kernel_size=(k, 1), padding=(k // 2, 0), bias=True)
+        self.softmax = nn.Softmax(dim=-2)
+
+    def forward(self, x):
+        # x: (B, C, n_channels, W)
+        x_pool = self.adaptive_pool(x)          # (B, C, 1, W) — collapse electrode axis
+        x_t    = x_pool.transpose(-2, -3)       # (B, 1, C, W) — swap C and electrode dims
+        y      = self.conv(x_t)                 # (B, 1, C, W) — attention logits
+        y      = self.softmax(y)                # softmax across filter axis (dim=-2 = C)
+        y      = y.transpose(-2, -3)            # (B, C, 1, W) — restore original axis order
+        return y * self.C * x                   # broadcast-multiply: (B, C, n_channels, W)
+
+
+class LMDANet(nn.Module):
+    def __init__(self, n_channels, n_classes, n_timepoints, depth=9, kernel=25, channel_depth1=24, channel_depth2=9,
+                 ave_depth=1, avepool=5, dropout=0.65):
+        super(LMDANet, self).__init__()
+
+        # ── Learnable channel weight matrix ───────────────────────────────────
+        # Shape (depth, 1, n_channels): projects input (B,1,C,T) → (B,depth,C,T)
+        # via einsum 'bdcw, hdc -> bhcw'. Learns depth independent spatial combinations
+        # of the 10 electrodes before any temporal filtering begins.
+        self.channel_weight = nn.Parameter(
+            torch.empty(depth, 1, n_channels), requires_grad=True
+        )
+        nn.init.xavier_uniform_(self.channel_weight.data)
+
+        # ── Temporal convolution ──────────────────────────────────────────────
+        # Stage 1 (1,1): mixes information across the depth dimension (cross-filter)
+        # Stage 2 (1,kernel): depthwise temporal conv extracts frequency-band patterns
+        #   per electrode independently (groups=channel_depth1 → no cross-electrode mixing)
+        # kernel=25 at 50 Hz ≈ 500 ms window, covering alpha/beta motor imagery rhythms
+        self.time_conv = nn.Sequential(
+            nn.Conv2d(depth, channel_depth1, kernel_size=(1, 1), groups=1, bias=False),
+            nn.BatchNorm2d(channel_depth1),
+            nn.Conv2d(channel_depth1, channel_depth1, kernel_size=(1, kernel),
+                      groups=channel_depth1, bias=False),
+            nn.BatchNorm2d(channel_depth1),
+            nn.GELU(),
+        )
+        # output: (B, channel_depth1, n_channels, T - kernel + 1)
+
+        # ── EEGDepthAttention ─────────────────────────────────────────────────
+        # Instantiated after time_conv using a dummy pass so W is exact.
+        # Attends over channel_depth1 filters at each time step.
+        _dummy = torch.ones(1, 1, n_channels, n_timepoints)
+        _dummy = torch.einsum('bdcw, hdc -> bhcw', _dummy, self.channel_weight)
+        _dummy = self.time_conv(_dummy)
+        _, C_da, _, W_da = _dummy.shape
+        self.depthAttention = EEGDepthAttention(W=W_da, C=C_da, k=7)
+
+        # ── Spatial (channel) convolution ─────────────────────────────────────
+        # Stage 1 (1,1): pointwise, reduces channel_depth1 → channel_depth2
+        # Stage 2 (C,1): depthwise, collapses the n_channels electrode axis to 1
+        self.chanel_conv = nn.Sequential(
+            nn.Conv2d(channel_depth1, channel_depth2, kernel_size=(1, 1), groups=1, bias=False),
+            nn.BatchNorm2d(channel_depth2),
+            nn.Conv2d(channel_depth2, channel_depth2, kernel_size=(n_channels, 1),
+                      groups=channel_depth2, bias=False),
+            nn.BatchNorm2d(channel_depth2),
+            nn.GELU(),
+        )
+        # output: (B, channel_depth2, 1, W_da)
+
+        # ── Temporal pooling + regularisation ────────────────────────────────
+        # AvgPool3d with kernel (1,1,avepool) pools along the time axis only.
+        # Using 3D pool on a 4D tensor treats (B, C, H, W) as (B, C, D, H, W)
+        # with an implicit D=1, so it slides avepool along W without touching C or H.
+        self.norm = nn.Sequential(
+            nn.AvgPool3d(kernel_size=(1, 1, avepool)),
+            nn.Dropout(p=dropout),
+        )
+
+        # ── Classifier — size computed from dummy forward pass ────────────────
+        _dummy = self.chanel_conv(_dummy)
+        _dummy = self.norm(_dummy)
+        fc_in  = _dummy.flatten(start_dim=1).shape[1]   # channel_depth2 * 1 * (W_da // avepool)
+        self.classifier = nn.Linear(fc_in, n_classes)
+
+        # ── Weight initialisation ─────────────────────────────────────────────
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.ones_(m.weight)
+                nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+    def forward(self, x):
+        # x: (B, 1, n_channels, n_timepoints)
+
+        # project input into depth learned spatial combinations
+        x = torch.einsum('bdcw, hdc -> bhcw', x, self.channel_weight)
+        # (B, depth, n_channels, n_timepoints)
+
+        x = self.time_conv(x)          # (B, channel_depth1, n_channels, T')
+        x = self.depthAttention(x)     # (B, channel_depth1, n_channels, T') — filter attention
+
+        x = self.chanel_conv(x)        # (B, channel_depth2, 1, T')
+        x = self.norm(x)               # (B, channel_depth2, 1, T'//avepool)
+
+        x = torch.flatten(x, start_dim=1)   # (B, channel_depth2 * T'//avepool)
+        return self.classifier(x)           # (B, n_classes)
+
+'''
+EEG-ITNet — Salami et al. (2022)
+Source: IEEE Access, 2022
+Architecture: Inception-based temporal feature extraction followed by a TCN:
+    - Inception block: three parallel temporal convolutions with kernel sizes (1,2), (1,4), (1,8)
+      applied simultaneously and concatenated, capturing multi-scale temporal patterns in one layer
+    - Depthwise spatial convolution collapses the electrode channel dimension
+    - Separable conv + average pooling reduce temporal resolution (same two-step as EEGNet block 2)
+    - TCN extracts long-range temporal dependencies from the compressed representation
+
+The key distinction from every other model here: multi-scale temporal feature extraction.
+All other models use a single fixed temporal kernel size, which biases them toward a specific
+frequency band. The inception block captures delta, alpha, and gamma rhythms simultaneously
+without committing to one scale.
+
+Results on BCI IV-2a: ~82–84% (subject-specific). Outperforms EEGNet while remaining
+comparably compact; slightly below ATCNet.
+Preprocessing: none
+'''
+
+class InceptionBlock(nn.Module):
+    """Three parallel temporal convolutions at different scales, merged by pointwise conv."""
+    def __init__(self, in_channels, out_per_branch=8):
+        super(InceptionBlock, self).__init__()
+        self.branch1 = nn.Sequential(
+            nn.Conv2d(in_channels, out_per_branch, kernel_size=(1, 2), padding='same', bias=False),
+            nn.BatchNorm2d(out_per_branch),
+            nn.ELU(inplace=True),
+        )
+        self.branch2 = nn.Sequential(
+            nn.Conv2d(in_channels, out_per_branch, kernel_size=(1, 4), padding='same', bias=False),
+            nn.BatchNorm2d(out_per_branch),
+            nn.ELU(inplace=True),
+        )
+        self.branch3 = nn.Sequential(
+            nn.Conv2d(in_channels, out_per_branch, kernel_size=(1, 8), padding='same', bias=False),
+            nn.BatchNorm2d(out_per_branch),
+            nn.ELU(inplace=True),
+        )
+        # pointwise conv merges the three branches into one feature map
+        self.merge = nn.Sequential(
+            nn.Conv2d(out_per_branch * 3, out_per_branch * 3, kernel_size=(1, 1), bias=False),
+            nn.BatchNorm2d(out_per_branch * 3),
+            nn.ELU(inplace=True),
+        )
+
+    def forward(self, x):
+        b1 = self.branch1(x)
+        b2 = self.branch2(x)
+        b3 = self.branch3(x)
+        return self.merge(torch.cat([b1, b2, b3], dim=1))
+
+
+class EEGITNet(nn.Module):
+    def __init__(self, n_channels, n_classes, n_timepoints, n_inception=2, out_per_branch=8, D=2, tcn_channels=16, tcn_layers=2, dropout=0.5): #can change D to 1 to reduce model size, or halve out_per_branch to 4, try lowering dropout to 0.3 if data accuracy is low
+        super(EEGITNet, self).__init__()
+        inc_ch = out_per_branch * 3   # 24 — output channels of each InceptionBlock
+
+        # stacked inception blocks; first takes raw (1-channel) input, remainder take inc_ch
+        blocks = [InceptionBlock(1, out_per_branch)]
+        for _ in range(n_inception - 1):
+            blocks.append(InceptionBlock(inc_ch, out_per_branch))
+        self.inception = nn.Sequential(*blocks)
+        # output: (B, inc_ch, n_channels, n_timepoints)
+
+        # depthwise spatial conv — collapses the electrode dimension, one filter per feature map
+        self.spatial = nn.Sequential(
+            nn.Conv2d(inc_ch, inc_ch * D, kernel_size=(n_channels, 1), groups=inc_ch, bias=False),
+            nn.BatchNorm2d(inc_ch * D),
+            nn.ELU(inplace=True),
+            nn.AvgPool2d(kernel_size=(1, 4)),
+            nn.Dropout(p=dropout),
+        )  # output: (B, inc_ch*D, 1, T//4)
+
+        # separable temporal conv + pool to match EEGNet's T//32 output length
+        sep_ch = inc_ch * D   # 48
+        self.temporal = nn.Sequential(
+            nn.Conv2d(sep_ch, sep_ch, kernel_size=(1, 16), groups=sep_ch, padding='same', bias=False),
+            nn.Conv2d(sep_ch, sep_ch, kernel_size=(1, 1), bias=False),
+            nn.BatchNorm2d(sep_ch),
+            nn.ELU(inplace=True),
+            nn.AvgPool2d(kernel_size=(1, 8)),
+            nn.Dropout(p=dropout),
+        )  # output: (B, sep_ch, 1, T//32)
+
+        Tc = n_timepoints // 32  # 7
+
+        self.tcn = TCN(sep_ch, tcn_channels, n_layers=tcn_layers, dropout=dropout)
+
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(tcn_channels * Tc, n_classes),
+            nn.Softmax(dim=1),
+        )
