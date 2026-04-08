@@ -51,3 +51,10 @@ http://0.0.0.0:8000/ping
 ngrok config add-authtoken {auth_token}
 ngrok http 8000
 ```
+
+
+
+Obstacle course
+- Living room with a hallway going to the bathroom
+
+[[Weimo/VLM/images/IMG_0007.webp]]
