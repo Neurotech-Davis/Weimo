@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 This experiment was created using PsychoPy3 Experiment Builder (v2024.2.4),
-    on March 31, 2026, at 21:45
+    on April 08, 2026, at 13:13
 If you publish work using this script the most relevant publication is:
 
     Peirce J, Gray JR, Simpson S, MacAskill M, Höchenberger R, Sogo H, Kastman E, Lindeløv JK. (2019) 
@@ -34,13 +34,13 @@ import psychopy.iohub as io
 from psychopy.hardware import keyboard
 
 # Run 'Before Experiment' code from set_params
-numReps = 1 # will be multiplied by 6
+numReps = 6 # will be multiplied by 6
 # number of loops per block
 numBlocks = 1
 # number of blocks
 numPractice = 1 # will be multiplied by 2, always plays at least once
 # number of practice reps
-numJawReps = 2
+numJawReps = 36
 numJawBlocks = 1
 # --- Setup global variables (available in all functions) ---
 # create a device manager to handle hardware (keyboards, mice, mirophones, speakers, etc.)
@@ -135,7 +135,7 @@ def setupData(expInfo, dataDir=None):
     thisExp = data.ExperimentHandler(
         name=expName, version='',
         extraInfo=expInfo, runtimeInfo=None,
-        originPath='\\\\wsl.localhost\\Ubuntu\\home\\aarpila\\projects\\weimo\\data_collection\\weimo_psychopy_lastrun.py',
+        originPath='C:\\Users\\akim0\\weimo\\Weimo\\data_collection\\weimo_psychopy_lastrun.py',
         savePickle=True, saveWideText=True,
         dataFileName=dataDir + os.sep + filename, sortColumns='time'
     )
