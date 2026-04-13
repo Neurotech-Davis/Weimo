@@ -32,7 +32,8 @@ STREAM_NAME = "WS-default"
 
 
 def preprocess_epoch(data: np.ndarray):  # -> torch.Tensor:
-    pass
+    # use preprocess_pipeline import for functions
+    return data
 
 
 def attempt_LSL_connection(max_retries: int, retry_delay: int):
@@ -91,4 +92,4 @@ def classifier_worker(shared_state):
         shared_state.classifier_running.value = False
         if stream is not None:
             stream.disconnect()
-            print("[classifier_worker] Stream disconnected.")
+        print("[classifier_worker] Stream disconnected.")
