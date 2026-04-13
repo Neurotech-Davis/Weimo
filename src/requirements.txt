@@ -1,2 +1,17 @@
 PyQt6
 opencv-python-headless
+
+### for eyetracker
+mediapipe
+
+### for classifier
+mne
+mne-lsl # theres some odd dependencies here? https://mne.tools/mne-lsl/stable/resources/install.html
+## dependencies of preprocessing/models
+matplotlib # not actually used, but imported
+scikit-learn
+torch
+torchvision
+einops
+
+

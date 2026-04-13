@@ -10,6 +10,22 @@
    - If on linux, errors might be encountered in running the PyQt6 process. If so, install the missing libraries: `sudo apt install libxcb-cursor0`
 3. From `/src`: `python3 main_process.py`
 
+---
+
+When using a new computer, adjustments need to be made to:
+
+- Default camera index
+- Camera resolution, the shared_memory frame buffer needs to be resized to accomodate.
+
+## Usage
+
+1) Launch the DSI-Streamer GUI and do initial signal checking. Use 
+    - Guide to debugging common signal quality pitfalls - [link to notes](https://vault.tynerlab.com/College/Clubs/Weimo-DSI-Streamer#signal)
+2) Iniate `dsi2lslGUI`, the LSL data streamer for the DSI-7 headset. Note: DSI-Streamer will likely have to be closed.
+    - [Link to Wearable Sensing Docs](https://support.wearablesensing.com/examples/lsl/gui.html)
+    - [Link to dsi2lsl download](https://github.com/labstreaminglayer/App-WearableSensing) - This one is a bit of a doozy, do as much as possible ahead of time.
+2) After the dsi2lslGUI is initiated, run the script. From `/src`: `python3 main_process.py`
+
 ## Worker contracts
 
 Workers need to be aware that they are run continously, can be thought of as having a "god-looop". Outputs will not be read unless they write to the `shared_state` parameter, in accordance with the values defined in `/src/core/shared_state.py`.

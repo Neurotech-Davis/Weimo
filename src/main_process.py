@@ -17,10 +17,11 @@ def main():
     shared_state = SharedState()  # all shared mem in one place
 
     p_tracker = mp.Process(target=eyetracker_worker, args=(shared_state,))
-    # p_classifier = mp.Process(target=classifier_worker, args=(shared_state, ))
-    p_lidar = mp.Process(target=lidar_worker, args=(shared_state,))
+    p_classifier = mp.Process(target=classifier_worker, args=(shared_state,))
+    # p_lidar = mp.Process(target=lidar_worker, args=(shared_state,))
 
-    process_arr = [p_tracker, p_lidar]
+    # process_arr = [p_tracker]
+    process_arr = [p_tracker, p_classifier]
     # process_arr = [p_tracker, p_classifier, p_lidar]
 
     for proc in process_arr:

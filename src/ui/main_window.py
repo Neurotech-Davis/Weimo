@@ -11,6 +11,7 @@ Right panel sections:
 """
 
 import cv2
+import numpy as np
 from PyQt6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -20,6 +21,7 @@ from PyQt6.QtWidgets import (
     QSlider,
     QSpinBox,
     QGroupBox,
+    QCheckBox,
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QImage, QPixmap
@@ -31,9 +33,7 @@ class MainWindow(QMainWindow):
         self.shared_state = shared_state
         self.setWindowTitle("Weimo")
         self.resize(1000, 600)
-
-        # UI-side camera capture (display only)
-        self._cap = cv2.VideoCapture(shared_state.camera_index.value)
+        self.mirrored = True
 
         self._build_ui()
 
@@ -137,7 +137,15 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._smooth_slider)
         layout.addWidget(self._smooth_label)
 
+        self._mirror_check = QCheckBox("Mirror feed")
+        self._mirror_check.setChecked(True)
+        self._mirror_check.toggled.connect(lambda v: setattr(self, "mirrored", v))
+        layout.addWidget(self._mirror_check)
+
         return box
+
+    def _on_camera_changed(self, value: int):
+        self.shared_state.camera_index.value = value
 
     # ------------------------------------------------------------------
     # Tick — called every 33ms
@@ -149,16 +157,25 @@ class MainWindow(QMainWindow):
         self._update_worker_status()
 
     def _update_feed(self):
-        ret, frame = self._cap.read()
-        if not ret:
+        if not self.shared_state.frame_ready.is_set():
             return
 
-        frame = cv2.flip(frame, 1)
+        with self.shared_state.frame_buffer.get_lock():
+            buf = np.frombuffer(
+                self.shared_state.frame_buffer.get_obj(), dtype=np.uint8
+            )
+            frame = buf.reshape(
+                (self.shared_state.FRAME_H, self.shared_state.FRAME_W, 3)
+            ).copy()
+
+        if self.mirrored:
+            frame = cv2.flip(frame, 1)
+
         gaze_x, gaze_y = self.shared_state.get_gaze()
 
         if gaze_x >= 0 and gaze_y >= 0:
             h, w = frame.shape[:2]
-            cx = int((1.0 - gaze_x) * w)
+            cx = int((gaze_x) * w)
             cy = int(gaze_y * h)
             cv2.circle(frame, (cx, cy), 12, (0, 255, 100), 2)
             cv2.circle(frame, (cx, cy), 3, (0, 255, 100), -1)
@@ -192,7 +209,7 @@ class MainWindow(QMainWindow):
         status_map = {
             "eyetracker": self.shared_state.tracker_running.value,
             # "lidar":       self.shared_state.lidar_running.value,
-            # "classifier":  self.shared_state.classifier_running.value,
+            "classifier": self.shared_state.classifier_running.value,
         }
         for name, label in self._status_labels.items():
             running = status_map.get(name, False)
@@ -202,11 +219,6 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Control callbacks — write params back to shared_state
     # ------------------------------------------------------------------
-
-    def _on_camera_changed(self, value: int):
-        self.shared_state.camera_index.value = value
-        self._cap.release()
-        self._cap = cv2.VideoCapture(value)
 
     def _on_smoothing_changed(self, value: int):
         factor = value / 100.0
@@ -219,6 +231,5 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._timer.stop()
-        self._cap.release()
         self.shared_state.shutdown.set()
         event.accept()
