@@ -186,8 +186,11 @@ from sklearn.model_selection import StratifiedKFold
 # =============================================================================
 
 FILES = [
-    './data_collection/annotated_eeg/chengyi0210.fif',
-    './data_collection/annotated_eeg/pilapil0226.fif',
+    '../data_collection/annotated_eeg/chengyi_4_8_0.fif',
+    '../data_collection/annotated_eeg/chengyi_4_8_1.fif',
+    '../data_collection/annotated_eeg/chengyi_4_9_0.fif',
+    '../data_collection/annotated_eeg/chengyi_4_9_1.fif',
+    '../data_collection/annotated_eeg/chengyi_4_9_2.fif',
 ]
 LABEL_MAP = {'idle': 0, 'move': 1, 'jaw_clench': 2}
 

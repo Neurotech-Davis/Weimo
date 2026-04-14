@@ -33,8 +33,11 @@ TRIAL_DUR    = 3.0  # seconds (tmax - tmin in epoch())
 N_TIMEPOINTS = int(SFREQ * TRIAL_DUR)
 
 FILES = [
-    '../data_collection/annotated_eeg/chengyi0210_eeg.fif',
-    '../data_collection/annotated_eeg/pilapil0226_eeg.fif',
+    '../data_collection/annotated_eeg/chengyi_4_8_0.fif',
+    '../data_collection/annotated_eeg/chengyi_4_8_1.fif',
+    '../data_collection/annotated_eeg/chengyi_4_9_0.fif',
+    '../data_collection/annotated_eeg/chengyi_4_9_1.fif',
+    '../data_collection/annotated_eeg/chengyi_4_9_2.fif',
 ]
 LABEL_MAP = {'idle': 0, 'move': 1, 'jaw_clench': 2}
 MAP_LABEL = {v: k for k, v in LABEL_MAP.items()}
