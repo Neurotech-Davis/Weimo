@@ -19,12 +19,13 @@ When using a new computer, adjustments need to be made to:
 
 ## Usage
 
-1) Launch the DSI-Streamer GUI and do initial signal checking. Use 
-    - Guide to debugging common signal quality pitfalls - [link to notes](https://vault.tynerlab.com/College/Clubs/Weimo-DSI-Streamer#signal)
-2) Iniate `dsi2lslGUI`, the LSL data streamer for the DSI-7 headset. Note: DSI-Streamer will likely have to be closed.
-    - [Link to Wearable Sensing Docs](https://support.wearablesensing.com/examples/lsl/gui.html)
-    - [Link to dsi2lsl download](https://github.com/labstreaminglayer/App-WearableSensing) - This one is a bit of a doozy, do as much as possible ahead of time.
-2) After the dsi2lslGUI is initiated, run the script. From `/src`: `python3 main_process.py`
+1. Launch the DSI-Streamer GUI and do initial signal checking. Use
+   - Guide to debugging common signal quality pitfalls - [DSI Signal Quality YT Video](https://www.youtube.com/watch?v=6juYPfUCEbA)
+     - [Link to notes](https://vault.tynerlab.com/College/Clubs/Weimo-DSI-Streamer#signal)
+2. Iniate `dsi2lslGUI`, the LSL data streamer for the DSI-7 headset. _Note_: DSI-Streamer **HAS** to be closed in order to free the COM port for the LSL streamer GUI.
+   - [Link to Wearable Sensing Docs](https://support.wearablesensing.com/examples/lsl/gui.html)
+   - [Link to dsi2lsl download](https://github.com/labstreaminglayer/App-WearableSensing) - There is a releases page to the left with a zip file with downloads.
+3. After the dsi2lslGUI is initiated, run the script. From `/src`: `python3 main_process.py`
 
 ## Worker contracts
 
@@ -68,9 +69,6 @@ def your_worker(shared_state):
     device.close()
 ```
 
-
 ## Resources
 
 MNE guide to LSL streams: [link](https://mne.tools/mne-lsl/stable/generated/tutorials/00_introduction.html)
-
-
