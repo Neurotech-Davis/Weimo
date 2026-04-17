@@ -67,3 +67,10 @@ def your_worker(shared_state):
         shared_state.your_field.value = result
     device.close()
 ```
+
+
+## Resources
+
+MNE guide to LSL streams: [link](https://mne.tools/mne-lsl/stable/generated/tutorials/00_introduction.html)
+
+
