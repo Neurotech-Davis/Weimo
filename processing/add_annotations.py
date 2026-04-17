@@ -167,6 +167,10 @@ def annotate(pairs, output_folder, eeg_folder, psychopy_folder):
 def main():
     '''
     add annotations for corresponding eeg and psychopy files at the right times
+    needs the following to work:
+    - ./data_collection/data/[name][id]pp.csv: psychopy folder
+    - ./data_collection/eeg_data/[name][id].edf: eeg folder
+    - ./data_collection/eeg_data/[name][id].csv: metadata
     '''
     # run from weimo
     # should be named "namedate(month then day).fif"

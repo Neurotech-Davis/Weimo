@@ -13,6 +13,7 @@ __pycache__/
 *.fif
 *.json
 *.npz
+*.png
 
 # stores info about the psychopy runs
 /data_collection/data
