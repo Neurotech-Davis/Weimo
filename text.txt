@@ -1,0 +1,35 @@
+Connected on attempt 1.
+
+--- Stream Info ---
+  All Channels (8): ['Pz', 'F4', 'C4', 'P4', 'P3', 'C3', 'F3', 'TRG']
+  Selected Channels (8): ['Pz', 'F4', 'C4', 'P4', 'P3', 'C3', 'F3', 'TRG']
+  Sfreq: 300.0 Hz
+  Expected shape per window: (8, 900)
+-------------------
+
+Collecting 10 windows. Ctrl+C to stop early...
+
+[01] shape=(8, 900) | mean=-677.4432 | std=7929.7314  | min=-19710.6836 | max=19710.6836
+  ⚠ WARNING: large amplitude spike — check electrode contact
+[02] shape=(8, 900) | mean=-481.2735 | std=8084.4009  | min=-19710.6836 | max=19710.6836
+  ⚠ WARNING: large amplitude spike — check electrode contact
+[03] shape=(8, 900) | mean=-361.6197 | std=8011.0103  | min=-19710.6836 | max=19710.6836
+  ⚠ WARNING: large amplitude spike — check electrode contact
+[04] shape=(8, 900) | mean=-375.9725 | std=8168.3374  | min=-19710.6836 | max=19710.6836
+  ⚠ WARNING: large amplitude spike — check electrode contact
+[05] shape=(8, 900) | mean=-402.2101 | std=8354.7139  | min=-19710.6836 | max=19710.6836
+  ⚠ WARNING: large amplitude spike — check electrode contact
+[06] shape=(8, 900) | mean=-388.0153 | std=8178.4805  | min=-19710.6836 | max=19710.6836
+  ⚠ WARNING: large amplitude spike — check electrode contact
+[07] shape=(8, 900) | mean=-144.6543 | std=7858.2163  | min=-19710.6836 | max=19710.6836
+  ⚠ WARNING: large amplitude spike — check electrode contact
+[08] shape=(8, 900) | mean=-176.5437 | std=7758.2700  | min=-19710.6836 | max=19665.8359
+  ⚠ WARNING: large amplitude spike — check electrode contact
+[09] shape=(8, 900) | mean=-32.2186 | std=7895.7192  | min=-19710.6836 | max=19665.8359
+  ⚠ WARNING: large amplitude spike — check electrode contact
+[10] shape=(8, 900) | mean=168.0880 | std=7779.2554  | min=-19665.8359 | max=19665.8359
+  ⚠ WARNING: large amplitude spike — check electrode contact
+Stream disconnected.
+
+Saved (10, 8, 900) → lsl_test_log_20260413_174941.npz
+Load with: data = np.load('lsl_test_log.npz')
