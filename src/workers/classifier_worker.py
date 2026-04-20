@@ -18,11 +18,10 @@ from ml_model import models
 from processing import preprocess_pipeline
 
 LABEL_MAP = {0: "idle", 1: "move", 2: "jaw_clench"}
-EXCLUDE = {"Trigger", "Event"}
+EXCLUDE = {"TRG"}  # excluding the trigger
 CONFIGS = {
     "N_CHANNELS": 8,
     "N_CLASSES": 3,
-    "SFREQ": 300,
     "TRIAL_DUR": 3,
     "STRIDE_SEC": 0.25,
 }
@@ -75,13 +74,64 @@ def classifier_worker(shared_state):
                 f"[classifier_worker] Could not connect to LSL stream '{STREAM_NAME}'. Is dsi2lsl running?"
             )
 
-        all_ch = stream.info["ch_names"]
-        eeg_picks = [ch for ch in all_ch if ch not in EXCLUDE]
+        all_ch = stream.info[
+            "ch_names"
+        ]  # DSI-7: ['Pz', 'F4', 'C4', 'P4', 'P3', 'C3', 'F3', 'TRG']
+        sfreq = stream.info["sfreq"]  # DSI-7 : 300
+        eeg_picks = [ch for ch in all_ch if ch not in EXCLUDE]  # removing 'TRG'
+
+        # print header info — first thing to validate
+        print("\n--- Stream Info ---")
+        print(f"  All Channels ({len(all_ch)}): {all_ch}")
+        print(f"  Selected Channels ({len(eeg_picks)}): {eeg_picks}")
+        print(f"  Sfreq: {sfreq} Hz")
+        print(
+            f"  Expected shape per window: ({len(eeg_picks)}, {int(sfreq * CONFIGS['TRIAL_DUR'])})"
+        )
+        print("-------------------\n")
 
         shared_state.classifier_running.value = True
+
         # LOOP
+        time.sleep(CONFIGS["TRIAL_DUR"] + 0.5)  # let buffer fill before first read
         while not shared_state.shutdown.is_set():
-            pass
+            t_start = time.perf_counter()
+
+            # get_data always returns the MOST RECENT winsize seconds from the buffer
+            data, timestamps = stream.get_data(
+                winsize=CONFIGS["TRIAL_DUR"],
+                picks=eeg_picks,
+            )
+            # data shape: (n_channels, n_timepoints) e.g. (7, 900)
+
+            # freshness check — is the newest sample actually recent?
+            stream_age = time.time() - timestamps[-1]
+            if stream_age > 0.5:
+                print(
+                    f"[classifier_worker] ⚠ Stream is {stream_age:.2f}s stale, skipping window"
+                )
+                time.sleep(0.1)
+                continue
+
+            # preprocess + inference
+            x = preprocess_epoch(data)  # (1, 1, n_channels, n_timepoints)
+            with torch.no_grad():
+                logits = model(x)
+                pred = logits.argmax(1).item()
+                conf = torch.softmax(logits, dim=1)[0, pred].item()
+
+            label = LABEL_MAP[pred]
+            print(f"[classifier_worker] pred={label:<12} conf={conf:.2f}")
+
+            shared_state.prediction.value = pred
+            elapsed = time.perf_counter() - t_start
+            remaining = CONFIGS["STRIDE_SEC"] - elapsed
+            if remaining > 0:
+                time.sleep(remaining)
+            else:
+                print(
+                    f"[classifier_worker] ⚠ Loop took {elapsed:.3f}s, over stride budget of {CONFIGS['STRIDE_SEC']}s"
+                )
 
     except Exception as e:
         # TODO : add information in shared_memory to accept diagnostics

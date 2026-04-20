@@ -7,7 +7,16 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-model_path = str(Path(__file__).parent.parent / "models" / "face_landmarker.task")
+# Loading model
+models_dir = Path(__file__).parent.parent / "models"
+model_path = str(models_dir / "face_landmarker.task")
+# Loading camera correction matrices
+cam_matrix_builtin = np.load(models_dir / "intrinsic_built-in.npy")
+cam_matrix_new_builtin = np.load(models_dir / "intrinsicNew_built-in.npy")
+dist_builtin = np.load(models_dir / "dist_built-in.npy")
+cam_matrix_usb = np.load(models_dir / "intrinsic_usb.npy")
+cam_matrix_new_usb = np.load(models_dir / "intrinsicNew_usb.npy")
+dist_usb = np.load(models_dir / "dist_usb.npy")
 
 FaceLandmarker = vision.FaceLandmarker
 FaceLandmarkerOptions = vision.FaceLandmarkerOptions
@@ -34,6 +43,8 @@ model_points = np.array(
 SENSITIVITY = 60
 PITCH_OFFSET = 0  # Adjust if cursor is too high/low when looking center
 YAW_OFFSET = 0
+# Define this so that the correct matrix is loaded
+BUILTIN_CAMERA_INDEX = 0
 
 
 def eyetracker_worker(shared_state):
@@ -42,8 +53,17 @@ def eyetracker_worker(shared_state):
     landmarker = FaceLandmarker.create_from_options(options)
     CAMERA_INDEX = shared_state.camera_index.value
 
-    cap = cv2.VideoCapture(CAMERA_INDEX)
     prev_x, prev_y = 0, 0
+
+    def open_camera(index):
+        cap = cv2.VideoCapture(index)
+        if index == BUILTIN_CAMERA_INDEX:
+            K, K_new, dist = cam_matrix_builtin, cam_matrix_new_builtin, dist_builtin
+        else:
+            K, K_new, dist = cam_matrix_usb, cam_matrix_new_usb, dist_usb
+        return cap, K, K_new, dist
+
+    cap, K, K_new, dist = open_camera(CAMERA_INDEX)
 
     # LOOP
     while not shared_state.shutdown.is_set():
@@ -52,7 +72,7 @@ def eyetracker_worker(shared_state):
         if new_index != CAMERA_INDEX:
             cap.release()
             CAMERA_INDEX = new_index
-            cap = cv2.VideoCapture(CAMERA_INDEX)
+            cap, K, K_new, dist = open_camera(CAMERA_INDEX)
 
         SMOOTHING = shared_state.smoothing_factor.value
 
@@ -62,6 +82,7 @@ def eyetracker_worker(shared_state):
             time.sleep(0.25)
             continue
 
+        frame = cv2.undistort(frame, K, dist, None, K_new)
         h, w, _ = frame.shape
         rgb_frame = mp.Image(
             image_format=mp.ImageFormat.SRGB,
@@ -88,16 +109,14 @@ def eyetracker_worker(shared_state):
             )
 
             # 2. Estimate Head Pose (PnP)
-            focal_length = w
-            cam_matrix = np.array(
-                [[focal_length, 0, w / 2], [0, focal_length, h / 2], [0, 0, 1]],
-                dtype="double",
-            )
+            # focal_length = w
+            # cam_matrix = np.array(
+            #     [[focal_length, 0, w / 2], [0, focal_length, h / 2], [0, 0, 1]],
+            #     dtype="double",
+            # )
 
             # success_flag, rot_vec, trans_vec
-            _, rot_vec, _ = cv2.solvePnP(
-                model_points, image_points, cam_matrix, np.zeros((4, 1))
-            )
+            _, rot_vec, _ = cv2.solvePnP(model_points, image_points, K_new, None)
 
             # 3. Get Rotation Angles (Degrees)
             rmat, _ = cv2.Rodrigues(rot_vec)

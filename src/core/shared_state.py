@@ -28,7 +28,7 @@ class SharedState:
         ### Classifier
         # classifier (classifier -> UI)
         self.classifier_running = mp.Value(ctypes.c_bool, False)
-        self.classification = mp.Value(ctypes.c_uint8, -1)
+        self.prediction = mp.Value(ctypes.c_uint8, -1)
 
         # classifier params (UI -> classifier)
         # does it need to pass anything?
