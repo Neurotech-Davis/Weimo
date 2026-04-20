@@ -6,8 +6,8 @@ from ui.main_window import MainWindow
 from core.shared_state import SharedState
 from workers.eyetracker_worker import eyetracker_worker
 from workers.classifier_worker import classifier_worker
-from workers.envcam_worker import envcam_worker
-from workers.lidar_worker import lidar_worker
+from workers.motor_worker import motor_worker
+from workers.pathfinding_worker import pathfinding_worker
 
 # potentially can/should build out the PyQT window as its own module
 
@@ -19,12 +19,12 @@ def main():
 
     p_tracker = mp.Process(target=eyetracker_worker, args=(shared_state,))
     p_classifier = mp.Process(target=classifier_worker, args=(shared_state,))
-    p_envcam = mp.Process(target=envcam_worker, args=(shared_state,))
-    # p_lidar = mp.Process(target=lidar_worker, args=(shared_state,))
+    # p_motor = mp.Process(target=motor_worker, args=(shared_state,))
+    # p_pathfinding = mp.Process(target=pathfinding_worker, args=(shared_state,))
 
     # process_arr = [p_tracker]
     process_arr = [p_tracker, p_classifier]
-    # process_arr = [p_tracker, p_classifier, p_lidar]
+    # process_arr = [p_tracker, p_classifier, p_pathfinding, p_motor]
 
     for proc in process_arr:
         proc.start()

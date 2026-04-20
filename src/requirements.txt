@@ -14,4 +14,8 @@ torch
 torchvision
 einops
 
+### for motor
+pyserial #? 
 
+### for pathfinder
+pyautogui # unecessary for final product but currently is used

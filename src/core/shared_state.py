@@ -10,7 +10,9 @@ class SharedState:
         # global, defines termination
         self.shutdown = mp.Event()
 
+        ### -----------
         ### Eyetracker
+        ### -----------
         # gaze (eyetracker -> UI)
         self.gaze_x = mp.Value(ctypes.c_float, -1.0)
         self.gaze_y = mp.Value(ctypes.c_float, -1.0)
@@ -25,13 +27,36 @@ class SharedState:
         self.camera_index = mp.Value(ctypes.c_int, 64)
         self.smoothing_factor = mp.Value(ctypes.c_float, 0.5)
 
+        ### -----------
         ### Classifier
+        ### -----------
         # classifier (classifier -> UI)
         self.classifier_running = mp.Value(ctypes.c_bool, False)
-        self.prediction = mp.Value(ctypes.c_uint8, -1)
+        self.prediction = mp.Value(ctypes.c_int, -1)
 
         # classifier params (UI -> classifier)
         # does it need to pass anything?
+
+        ### -----------
+        ### Motor
+        ### -----------
+        # Pathfinding -> Motor
+        self.motor_command = mp.Value(ctypes.c_int, 0)  # UI writes intent
+        self.target_angle = mp.Value(ctypes.c_float, 0.0)
+        self.target_dist = mp.Value(ctypes.c_float, 0.0)
+        # Motor -> UI
+        self.motor_state = mp.Value(ctypes.c_int, 0)
+        self.motor_running = mp.Value(ctypes.c_bool, False)
+        self.motor_error = mp.Event()
+
+        ### -----------
+        ### Pathfinding
+        ### -----------
+        # UI -> Pathfinding
+        self.pathfinding_camera_index = mp.Value(ctypes.c_int, 1)
+        # Pathfinding -> UI
+        self.pathfinding_running = mp.Value(ctypes.c_bool, False)
+        self.pathfinding_error = mp.Event()
 
     def get_gaze(self) -> tuple:
         return self.gaze_x.value, self.gaze_y.value

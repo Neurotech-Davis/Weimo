@@ -79,7 +79,7 @@ def eyetracker_worker(shared_state):
         success, frame = cap.read()
         if not success:
             print("[eyetracker_worker] Error reading from camera")
-            time.sleep(0.25)
+            time.sleep(1)
             continue
 
         frame = cv2.undistort(frame, K, dist, None, K_new)
