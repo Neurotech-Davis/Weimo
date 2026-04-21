@@ -1,0 +1,14 @@
+
+Link to full doc: https://docs.google.com/document/d/1Z02yVsx4ZctY6biw25cjxg6u1g2lqrWNtjPNvSZtla8/edit?tab=t.0
+
+# Try each:
+
+https://github.com/antoinelame/GazeTracking - stars:2500 Most popular librry
+https://github.com/esdalmaijer/PyGaze - stars:741 Very beginner friendly
+https://github.com/JEOresearch/EyeTracker - stars:641 Not sure about this one, the individual dev. Some comments say difficult to use.
+https://github.com/NativeSensors/EyeGestures - stars:521 kinda popular, 2 months ago
+https://github.com/ck-zhang/EyeTrax - stars:227
+https://github.com/algoasylum/pyEyeTrack - stars:63 Not popular, not updated (6 yrs) 
+
+# Logs:
+

@@ -78,7 +78,7 @@ def eyetracker_worker(shared_state):
 
         success, frame = cap.read()
         if not success:
-            print("[eyetracker_worker] Error reading from camera")
+            # print("[eyetracker_worker] Error reading from camera")
             time.sleep(1)
             continue
 

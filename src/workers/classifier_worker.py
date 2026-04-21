@@ -9,7 +9,9 @@ import os
 
 import numpy as np
 import torch
+import mne
 
+from mne_lsl.lsl import local_clock
 from mne_lsl.stream import StreamLSL
 from mne.time_frequency import psd_array_welch
 
@@ -18,7 +20,11 @@ from ml_model import models
 from processing import preprocess_pipeline
 
 LABEL_MAP = {0: "idle", 1: "move", 2: "jaw_clench"}
-EXCLUDE = {"TRG"}  # excluding the trigger
+# EXCLUDE = {"TRG"}  # excluding the trigger
+EXCLUDE = {
+    "Trigger",
+    "Event",
+}  # this is very ghetto, but should make inputs same for mock and live streams
 CONFIGS = {
     "N_CHANNELS": 8,
     "N_CLASSES": 3,
@@ -27,13 +33,33 @@ CONFIGS = {
     "STRIDE_SEC": 0.25,
 }
 CONFIGS["N_TIMEPOINTS"] = int(CONFIGS["SFREQ"] * CONFIGS["TRIAL_DUR"])
-MODEL_PATH = "../models/best_model.pt"  # name is arbitrary
+MODEL_PATH = "./models/DeepConvNet.pt"  # name is arbitrary
 STREAM_NAME = "WS-default"
 
 
 def preprocess_epoch(data: np.ndarray):  # -> torch.Tensor:
-    # use preprocess_pipeline import for functions
-    return data
+    # 1. Create temporary Raw object
+    # Order must match training: ['Pz', 'F4', 'C4', 'P4', 'P3', 'C3', 'F3', 'TRG']
+    ch_names = ["Pz", "F4", "C4", "P4", "P3", "C3", "F3", "TRG"]
+    info = mne.create_info(ch_names=ch_names, sfreq=300, ch_types="eeg")
+    raw = mne.io.RawArray(data, info, verbose=False)
+
+    raw.notch_filter(60.0, method="iir", verbose=False)
+    raw.filter(
+        13.0, 30.0, method="iir", verbose=False
+    )  # Based on your best result [(13, 30)]
+    raw.set_eeg_reference(ref_channels="average", verbose=False)
+
+    X = raw.get_data()  # (8, 900)
+
+    mean = X.mean(axis=-1, keepdims=True)
+    std = X.std(axis=-1, keepdims=True) + 1e-8
+    X = (X - mean) / std
+
+    x_tensor = torch.from_numpy(X).float()
+    x_tensor = x_tensor.unsqueeze(0).unsqueeze(0)  # -> (1, 1, 8, 900)
+
+    return x_tensor
 
 
 def attempt_LSL_connection(max_retries: int, retry_delay: int):
@@ -106,7 +132,7 @@ def classifier_worker(shared_state):
             # data shape: (n_channels, n_timepoints) e.g. (7, 900)
 
             # freshness check — is the newest sample actually recent?
-            stream_age = time.time() - timestamps[-1]
+            stream_age = local_clock() - timestamps[-1]
             if stream_age > 0.5:
                 print(
                     f"[classifier_worker] ⚠ Stream is {stream_age:.2f}s stale, skipping window"
@@ -114,8 +140,23 @@ def classifier_worker(shared_state):
                 time.sleep(0.1)
                 continue
 
+            print(
+                f"DEBUG: Data Max={data.max():.6f} | Data Min={data.min():.6f} | Data Mean={data.mean():.6f}"
+            )
+
+            # Check if the data is actually changing
+            if "last_data" in locals() and np.array_equal(data, last_data):
+                print("⚠ WARNING: Data is identical to last window!")
+            last_data = data.copy()
+
             # preprocess + inference
             x = preprocess_epoch(data)  # (1, 1, n_channels, n_timepoints)
+            # Validation logs
+            print(
+                f"DEBUG: Tensor Shape: {x.shape} | Max: {x.max():.2f} | Min: {x.min():.2f}"
+            )
+            if torch.isnan(x).any():
+                print("⚠ FATAL: Tensor contains NaNs!")
             with torch.no_grad():
                 logits = model(x)
                 pred = logits.argmax(1).item()

@@ -9,8 +9,6 @@ from workers.classifier_worker import classifier_worker
 from workers.motor_worker import motor_worker
 from workers.pathfinding_worker import pathfinding_worker
 
-# potentially can/should build out the PyQT window as its own module
-
 import multiprocessing as mp
 
 
