@@ -33,6 +33,7 @@ class SharedState:
         # classifier (classifier -> UI)
         self.classifier_running = mp.Value(ctypes.c_bool, False)
         self.prediction = mp.Value(ctypes.c_int, -1)
+        self.pred_confidence = mp.Value(ctypes.c_float, -1.0)
 
         # classifier params (UI -> classifier)
         # does it need to pass anything?

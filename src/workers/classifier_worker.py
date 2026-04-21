@@ -166,6 +166,7 @@ def classifier_worker(shared_state):
             print(f"[classifier_worker] pred={label:<12} conf={conf:.2f}")
 
             shared_state.prediction.value = pred
+            shared_state.pred_confidence.value = float(conf)
             elapsed = time.perf_counter() - t_start
             remaining = CONFIGS["STRIDE_SEC"] - elapsed
             if remaining > 0:

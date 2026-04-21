@@ -93,6 +93,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._build_camera_switcher_group())
         layout.addWidget(self._build_gaze_group())
         layout.addWidget(self._build_eyetracker_controls_group())
+        layout.addWidget(self._build_classifier_group())
         layout.addWidget(self._build_motor_group())
         layout.addStretch()
 
@@ -199,6 +200,23 @@ class MainWindow(QMainWindow):
 
         return box
 
+    # -- Classifier output --
+    def _build_classifier_group(self) -> QGroupBox:
+        box = QGroupBox("Classifier")
+        layout = QVBoxLayout(box)
+
+        self._pred_label = QLabel("Prediction: --")
+        self._pred_label.setStyleSheet(
+            "font-family: monospace; font-size: 13px; font-weight: bold;"
+        )
+        layout.addWidget(self._pred_label)
+
+        self._conf_label = QLabel("Confidence: --")
+        self._conf_label.setStyleSheet("font-family: monospace; font-size: 12px;")
+        layout.addWidget(self._conf_label)
+
+        return box
+
     # --- Motor controls ---
 
     def _build_motor_group(self) -> QGroupBox:
@@ -255,6 +273,7 @@ class MainWindow(QMainWindow):
         self._update_feed()
         self._update_gaze_readout()
         self._update_worker_status()
+        self._update_classifier_readout()
         self._update_motor_readout()
 
     def _update_feed(self):
@@ -340,6 +359,23 @@ class MainWindow(QMainWindow):
         for name, label in self._status_labels.items():
             running = status_map.get(name, False)
             label.setStyleSheet("color: #00cc66;" if running else "color: #555;")
+
+    def _update_classifier_readout(self):
+        pred = self.shared_state.prediction.value
+        if pred < 0:
+            self._pred_label.setText("Prediction: --")
+            self._conf_label.setText("Confidence: --")
+            return
+
+        label = {0: "idle", 1: "move", 2: "jaw_clench"}.get(pred, "?")
+        colors = {0: "#888888", 1: "#00cc66", 2: "#cc8800"}
+        self._pred_label.setText(f"Prediction: {label.upper()}")
+        self._pred_label.setStyleSheet(
+            f"font-family: monospace; font-size: 13px; font-weight: bold; color: {colors.get(pred, '#fff')};"
+        )
+        conf = self.shared_state.pred_confidence.value
+        if conf >= 0:
+            self._conf_label.setText(f"Confidence: {conf:.0%}")
 
     def _update_motor_readout(self):
         state_id = self.shared_state.motor_state.value

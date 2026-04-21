@@ -15,10 +15,13 @@ import multiprocessing as mp
 def main():
     shared_state = SharedState()  # all shared mem in one place
 
-    p_tracker = mp.Process(target=eyetracker_worker, args=(shared_state,))
-    p_classifier = mp.Process(target=classifier_worker, args=(shared_state,))
+    # Daemon=true means they are killed when parent dies. This is desired UNLESS they have important cleanup in their "finally" block, like the motor worker which wants to shut off the car.
+    p_tracker = mp.Process(target=eyetracker_worker, args=(shared_state,), daemon=True)
+    p_classifier = mp.Process(
+        target=classifier_worker, args=(shared_state,), daemon=True
+    )
     # p_motor = mp.Process(target=motor_worker, args=(shared_state,))
-    # p_pathfinding = mp.Process(target=pathfinding_worker, args=(shared_state,))
+    # p_pathfinding = mp.Process(target=pathfinding_worker, args=(shared_state,), daemon=True)
 
     # process_arr = [p_tracker]
     process_arr = [p_tracker, p_classifier]
