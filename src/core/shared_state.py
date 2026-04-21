@@ -24,7 +24,7 @@ class SharedState:
         self.frame_ready = mp.Event()
 
         # eyetracker params (UI -> eyetracker)
-        self.camera_index = mp.Value(ctypes.c_int, 64)
+        self.camera_index = mp.Value(ctypes.c_int, 0)
         self.smoothing_factor = mp.Value(ctypes.c_float, 0.5)
 
         ### -----------
