@@ -30,7 +30,7 @@ CONFIGS = {
     "N_CLASSES": 3,
     "TRIAL_DUR": 3,
     "SFREQ": 300,
-    "STRIDE_SEC": 0.25,
+    "STRIDE_SEC": 1,
 }
 CONFIGS["N_TIMEPOINTS"] = int(CONFIGS["SFREQ"] * CONFIGS["TRIAL_DUR"])
 MODEL_PATH = "./models/DeepConvNet.pt"  # name is arbitrary

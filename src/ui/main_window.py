@@ -300,7 +300,7 @@ class MainWindow(QMainWindow):
         gaze_x, gaze_y = self.shared_state.get_gaze()
         if gaze_x >= 0 and gaze_y >= 0:
             h, w = frame.shape[:2]
-            cx = int((1.0 - gaze_x) * w) if self.mirrored else int(gaze_x * w)
+            cx = int(gaze_x * w)
             cy = int(gaze_y * h)
             cv2.circle(frame, (cx, cy), 12, (0, 255, 100), 2)
             cv2.circle(frame, (cx, cy), 3, (0, 255, 100), -1)

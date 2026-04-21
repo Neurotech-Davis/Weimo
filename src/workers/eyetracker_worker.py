@@ -82,7 +82,7 @@ def eyetracker_worker(shared_state):
             time.sleep(1)
             continue
 
-        frame = cv2.undistort(frame, K, dist, None, K_new)
+        # .unsqueeze(0). frame = cv2.undistort(frame, K, dist, None, K_new)
         h, w, _ = frame.shape
         rgb_frame = mp.Image(
             image_format=mp.ImageFormat.SRGB,
