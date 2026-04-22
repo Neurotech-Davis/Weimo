@@ -196,6 +196,13 @@ def classifier_worker(shared_state):
 
             # preprocess
             x = preprocess_epoch(data)
+            # DEBUG — remove once hardware validated
+            print(
+                f"  [preprocess] raw    range: [{data.min():.6f}, {data.max():.6f}]  std: {data.std():.6f}"
+            )
+            print(
+                f"  [preprocess] scaled range: [{X.min():.3f}, {X.max():.3f}]  std: {X.std():.3f}"
+            )
             if torch.isnan(x).any():
                 print("[classifier_worker] ⚠ NaNs in tensor — skipping")
                 continue
