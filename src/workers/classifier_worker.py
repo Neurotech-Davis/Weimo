@@ -201,7 +201,7 @@ def classifier_worker(shared_state):
                 f"  [preprocess] raw    range: [{data.min():.6f}, {data.max():.6f}]  std: {data.std():.6f}"
             )
             print(
-                f"  [preprocess] scaled range: [{X.min():.3f}, {X.max():.3f}]  std: {X.std():.3f}"
+                f"  [preprocess] scaled range: [{x.min():.3f}, {x.max():.3f}]  std: {x.std():.3f}"
             )
             if torch.isnan(x).any():
                 print("[classifier_worker] ⚠ NaNs in tensor — skipping")
