@@ -17,6 +17,7 @@ from mne_lsl.stream import StreamLSL
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from ml_model import models
 
+MOVE_CONFIDENCE_THRESHOLD = 0.95
 LABEL_MAP = {0: "idle", 1: "move", 2: "jaw_clench"}
 EXCLUDE = {"Trigger", "Event"}
 
@@ -216,7 +217,11 @@ def classifier_worker(shared_state):
             label = LABEL_MAP[pred]
             print(f"[classifier_worker] pred={label:<12} conf={conf:.2f}")
 
-            shared_state.prediction.value = pred
+            # only write confident predictions — motor_worker reads this
+            if conf >= MOVE_CONFIDENCE_THRESHOLD:
+                shared_state.prediction.value = pred
+            else:
+                shared_state.prediction.value = 0  # treat low confidence as idle
             shared_state.pred_confidence.value = float(conf)
 
             elapsed = time.perf_counter() - t_start

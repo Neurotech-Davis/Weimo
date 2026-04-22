@@ -1,25 +1,35 @@
 """
 workers/motor_worker.py
-Windows PC → pyserial (USB) → Pico (PicoFolder/main.py) → Motor HAT → motors
+Windows PC → pyserial (USB) → Pico → Motor HAT → motors
 
-Protocol (must match PicoFolder/main.py):
-  MECANUM:fwd:strafe:turn\n  → set motor speeds, Pico responds OK:MOVING
-  STOP\n                     → stop all motors, Pico responds OK:STOPPED
+Pico protocol:
+  TURN:<angle_deg>\n   → rotate to angle, Pico responds OK:DONE
+  DRIVE:<dist_mm>\n    → drive forward dist_mm, Pico responds OK:DONE
+  STOP\n               → immediate stop, Pico responds OK:STOPPED
+
+State machine:
+  IDLE    → on MOVE prediction + valid target → DRIVING
+  DRIVING → on arrival → IDLE
+  DRIVING → on jaw_clench at any point → IDLE (emergency stop)
+  DRIVING → on manual UI command → IDLE (manual override)
 """
 
 import serial
 import time
+from enum import Enum
 
 
-PICO_PORT = "/dev/ttyACM0"  # Windows: check Device Manager
+PICO_PORT = "/dev/ttyACM0"  # Windows: COM3 etc.
 BAUD_RATE = 115200
-SPEED = 1500  # PWM value 0-4095, tune for your buggy
 
-# Tuning constants — adjust these against real hardware
-ANGLE_THRESHOLD_DEG = 10.0  # within this, consider aligned
-DIST_THRESHOLD_MM = 150.0  # within this, consider arrived
-DEG_PER_SEC = 90.0  # how fast buggy rotates — measure this
-MM_PER_SEC = 300.0  # how fast buggy drives forward — measure this
+MOVE_CONFIDENCE_THRESHOLD = 0.95
+DIST_THRESHOLD_M = 0.150
+ANGLE_THRESHOLD_DEG = 10.0
+
+
+class MotorState(Enum):
+    IDLE = "idle"
+    DRIVING = "driving"
 
 
 # ── Serial helpers ────────────────────────────────────────────────────────────
@@ -38,12 +48,14 @@ def connect(port: str, baud: int, retries: int = 5) -> serial.Serial:
 
 
 def send(ser: serial.Serial, cmd: str) -> str:
-    """Send a command string, return Pico's ack line."""
+    """Send command, block until Pico acks."""
     ser.write((cmd + "\n").encode())
     try:
         ack = ser.readline().decode().strip()
+        print(f"[motor_worker] sent={cmd!r}  ack={ack!r}")
         return ack
-    except Exception:
+    except Exception as e:
+        print(f"[motor_worker] ack read failed: {e}")
         return ""
 
 
@@ -51,53 +63,57 @@ def cmd_stop(ser):
     return send(ser, "STOP")
 
 
-def cmd_mecanum(ser, fwd: int, strafe: int, turn: int):
-    return send(ser, f"MECANUM:{fwd}:{strafe}:{turn}")
+def cmd_turn(ser, angle_deg: float) -> str:
+    return send(ser, f"TURN:{angle_deg:.1f}")
+
+
+def cmd_drive(ser, dist_mm: float) -> str:
+    return send(ser, f"DRIVE:{dist_mm:.0f}")
+
+
+# ── Jaw clench check — call between blocking operations ───────────────────────
+
+
+def jaw_clench_detected(shared_state) -> bool:
+    return shared_state.prediction.value == 2
 
 
 # ── Navigation primitives ─────────────────────────────────────────────────────
 
 
-def rotate_to_angle(ser, h_angle: float):
-    """Rotate in place until aligned with target angle."""
-    if abs(h_angle) <= ANGLE_THRESHOLD_DEG:
-        return
+def navigate_to(ser, h_angle: float, dist_mm: float, shared_state) -> bool:
+    """
+    Rotate then drive to target.
+    Checks for jaw_clench between each step.
+    Returns True if arrived, False if aborted by jaw_clench.
+    """
+    print(f"[motor_worker] navigating → angle={h_angle:.1f}° dist={dist_mm:.0f}mm")
 
-    duration = abs(h_angle) / DEG_PER_SEC
-    turn_speed = SPEED if h_angle > 0 else -SPEED
+    # step 1 — rotate to align
+    if abs(h_angle) > ANGLE_THRESHOLD_DEG:
+        if jaw_clench_detected(shared_state):
+            print("[motor_worker] jaw_clench — aborting before rotate")
+            cmd_stop(ser)
+            return False
+        print(f"[motor_worker] rotating {h_angle:.1f}°")
+        cmd_turn(ser, h_angle)  # blocks until Pico acks OK:DONE
 
-    print(f"[motor] rotating {h_angle:.1f}° — {duration:.2f}s")
-    # cmd_mecanum(ser, 0, 0, turn_speed)
-    send(ser, f"TURN:{h_angle}")
-    time.sleep(duration)
-    cmd_stop(ser)
-    time.sleep(0.1)  # brief settle
+    # step 2 — check again before driving
+    if jaw_clench_detected(shared_state):
+        print("[motor_worker] jaw_clench — aborting before drive")
+        cmd_stop(ser)
+        return False
 
+    # step 3 — drive forward
+    if dist_mm > DIST_THRESHOLD_M:
+        print(f"[motor_worker] driving {dist_mm:.0f}mm")
+        cmd_drive(ser, dist_mm)  # blocks until Pico acks OK:DONE
 
-def drive_distance(ser, dist_mm: float):
-    """Drive forward for estimated time to cover dist_mm."""
-    if dist_mm <= DIST_THRESHOLD_MM:
-        print("[motor] already at target distance")
-        return
-
-    duration = dist_mm / MM_PER_SEC
-    print(f"[motor] driving {dist_mm:.0f}mm — {duration:.2f}s")
-    # cmd_mecanum(ser, SPEED, 0, 0)
-    send(ser, f"DRIVE:{dist_mm}")
-    time.sleep(duration)
-    cmd_stop(ser)
-    time.sleep(0.1)
-
-
-def navigate_to(ser, h_angle: float, dist_mm: float):
-    """Rotate to align, then drive to target. Sequential, blocking."""
-    print(f"[motor] navigating → angle={h_angle:.1f}° dist={dist_mm:.0f}mm")
-    rotate_to_angle(ser, h_angle)
-    drive_distance(ser, dist_mm)
-    print("[motor] arrived at target")
+    print("[motor_worker] arrived at target")
+    return True
 
 
-# ── Worker (called by main_process.py) ───────────────────────────────────────
+# ── Worker ────────────────────────────────────────────────────────────────────
 
 
 def motor_worker(shared_state):
@@ -105,65 +121,77 @@ def motor_worker(shared_state):
     try:
         ser = connect(PICO_PORT, BAUD_RATE)
         shared_state.motor_running.value = True
-        last_cmd = -1
-        navigating = False
+
+        state = MotorState.IDLE
+        print(f"[motor_worker] state=IDLE, ready")
 
         while not shared_state.shutdown.is_set():
             t_start = time.perf_counter()
 
-            # manual UI command takes priority — cancels any active navigation
+            # ── manual UI override — always highest priority ──
             manual_cmd = shared_state.motor_command.value
             if manual_cmd != 0:
-                navigating = False
-                if manual_cmd != last_cmd:
-                    fwd, strafe, turn = _cmd_to_vectors(manual_cmd)
-                    cmd_mecanum(ser, fwd, strafe, turn)
-                    shared_state.motor_state.value = manual_cmd
-                    last_cmd = manual_cmd
+                if state == MotorState.DRIVING:
+                    print("[motor_worker] manual override — aborting navigation")
+                cmd_stop(ser)
+                state = MotorState.IDLE
+                shared_state.motor_state.value = 0
+                shared_state.motor_command.value = 0  # consume
+                time.sleep(0.05)
+                continue
 
-            elif not navigating and shared_state.prediction.value == 1:  # 1 = move
-                # latch current target and navigate
-                h_angle = shared_state.target_angle.value
-                dist = shared_state.target_dist.value
-                navigating = True
-                navigate_to(ser, h_angle, dist)
-                navigating = False
-                shared_state.motor_command.value = 0
-
-            else:
-                if last_cmd != 0:
+            # ── jaw clench emergency stop ──
+            if jaw_clench_detected(shared_state):
+                if state == MotorState.DRIVING:
+                    print("[motor_worker] jaw_clench — emergency stop")
                     cmd_stop(ser)
+                    state = MotorState.IDLE
                     shared_state.motor_state.value = 0
-                    last_cmd = 0
+                    shared_state.prediction.value = 0  # consume
+                time.sleep(0.05)
+                continue
+
+            # ── state machine ──
+            if state == MotorState.IDLE:
+                pred = shared_state.prediction.value
+                conf = shared_state.pred_confidence.value
+
+                if pred == 1 and conf >= MOVE_CONFIDENCE_THRESHOLD:
+                    # latch target at moment of move prediction
+                    h_angle = shared_state.target_angle.value
+                    dist = shared_state.target_dist.value
+                    shared_state.prediction.value = 0  # consume
+
+                    if dist > DIST_THRESHOLD_M:
+                        state = MotorState.DRIVING
+                        shared_state.motor_state.value = 1
+                        print(f"[motor_worker] IDLE → DRIVING")
+
+                        arrived = navigate_to(ser, h_angle, dist, shared_state)
+
+                        state = MotorState.IDLE
+                        shared_state.motor_state.value = 0
+                        print(f"[motor_worker] DRIVING → IDLE  (arrived={arrived})")
+                    else:
+                        print("[motor_worker] target too close, ignoring")
 
             elapsed = time.perf_counter() - t_start
             time.sleep(max(0.0, 0.05 - elapsed))
 
     except Exception as e:
-        print(f"[motor] fatal error: {e}")
+        print(f"[motor_worker] fatal error: {e}")
+        shared_state.motor_error.set()
+
     finally:
         shared_state.motor_running.value = False
         if ser and ser.is_open:
             cmd_stop(ser)
             time.sleep(0.1)
             ser.close()
-        print("[motor] shutdown complete")
+        print("[motor_worker] shutdown complete")
 
 
-def _cmd_to_vectors(cmd_id: int):
-    """Map UI command ID to (fwd, strafe, turn) vectors."""
-    return {
-        0: (0, 0, 0),  # stop
-        1: (SPEED, 0, 0),  # forward
-        2: (-SPEED, 0, 0),  # backward
-        3: (0, 0, -SPEED),  # rotate left
-        4: (0, 0, SPEED),  # rotate right
-        5: (0, -SPEED, 0),  # strafe left
-        6: (0, SPEED, 0),  # strafe right
-    }.get(cmd_id, (0, 0, 0))
-
-
-# ── Manual test script ────────────────────────────────────────────────────────
+# ── Manual test ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     print("=== Motor Worker Manual Test ===")
@@ -175,13 +203,9 @@ if __name__ == "__main__":
         print(e)
         exit(1)
 
-    print("Connected. Commands:")
-    print("  navigate <angle_deg> <dist_mm>  — e.g. 'navigate 30 500'")
-    print("  forward  <dist_mm>              — e.g. 'forward 300'")
-    print("  rotate   <angle_deg>            — e.g. 'rotate -45'")
-    print("  stop")
-    print("  quit")
-    print()
+    print(
+        "Commands: navigate <angle> <dist> | turn <angle> | drive <dist> | stop | quit"
+    )
 
     try:
         while True:
@@ -189,7 +213,6 @@ if __name__ == "__main__":
                 raw = input("> ").strip().lower()
             except EOFError:
                 break
-
             if not raw:
                 continue
 
@@ -198,30 +221,24 @@ if __name__ == "__main__":
 
             if cmd == "quit":
                 break
-
             elif cmd == "stop":
-                ack = cmd_stop(ser)
-                print(f"  ack: {ack}")
-
-            elif cmd == "forward" and len(parts) == 2:
-                dist = float(parts[1])
-                drive_distance(ser, dist)
-
-            elif cmd == "rotate" and len(parts) == 2:
-                angle = float(parts[1])
-                rotate_to_angle(ser, angle)
-
+                print(cmd_stop(ser))
+            elif cmd == "turn" and len(parts) == 2:
+                print(cmd_turn(ser, float(parts[1])))
+            elif cmd == "drive" and len(parts) == 2:
+                print(cmd_drive(ser, float(parts[1])))
             elif cmd == "navigate" and len(parts) == 3:
-                angle = float(parts[1])
-                dist = float(parts[2])
-                navigate_to(ser, angle, dist)
 
+                class _FakeState:
+                    class prediction:
+                        value = 0
+
+                navigate_to(ser, float(parts[1]), float(parts[2]), _FakeState())
             else:
-                print("  unknown command — try 'navigate 30 500'")
+                print("unknown command")
 
     except KeyboardInterrupt:
         print("\nInterrupted.")
-
     finally:
         cmd_stop(ser)
         ser.close()
