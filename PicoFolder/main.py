@@ -1,4 +1,4 @@
-from machine import Pin, I2C, time_pulse_us
+from machine import Pin, I2C
 import time
 import math
 import sys
@@ -9,171 +9,153 @@ WHEEL_DIAMETER_M = 0.066
 WHEEL_CIRCUMFERENCE = math.pi * WHEEL_DIAMETER_M
 TICKS_PER_REV = 247  
 METERS_PER_TICK = WHEEL_CIRCUMFERENCE / TICKS_PER_REV
+DISTANCE_MULTIPLIER = 0.80 
+TRACK_WIDTH_M = 0.17 
 
-# --- I2C MOTOR HAT DRIVER ---
-class MotorHat:
-    def __init__(self, i2c_bus, addr=0x60):
-        self.i2c = i2c_bus
-        self.addr = addr
-        self._init_pca9685()
-
-    def _init_pca9685(self):
-        try:
-            self.i2c.writeto_mem(self.addr, 0x00, b'\x20') 
-            time.sleep(0.05)
-            self.i2c.writeto_mem(self.addr, 0x01, b'\x04') 
-        except OSError:
-            print("[!] Motor Hat not detected on I2C bus.")
-
-    def set_pwm(self, channel, on, off):
-        data = bytearray([on & 0xFF, on >> 8, off & 0xFF, off >> 8])
-        try:
-            self.i2c.writeto_mem(self.addr, 0x06 + 4 * channel, data)
-        except OSError:
-            pass
-
-    def set_pin(self, channel, state):
-        if state == 1:
-            self.set_pwm(channel, 4096, 0) 
-        else:
-            self.set_pwm(channel, 0, 4096) 
-
-# --- INDIVIDUAL WHEEL CLASS ---
-class Wheel:
-    def __init__(self, motor_id, hat, pwm_pin, in1, in2, enc_a_pin, enc_b_pin, reverse_enc=False):
-        self.motor_id = motor_id
-        self.hat = hat
-        self.pwm_pin = pwm_pin
-        self.in1 = in1
-        self.in2 = in2
-        
-        # Software variables
-        self.ticks = 0
-        self.reverse_enc = reverse_enc
-        self.power_bias = 1.0 # 1.0 = 100% power, 0.9 = 90% power
-        
-        # Hardware Pins
-        self.enc_a = Pin(enc_a_pin, Pin.IN, Pin.PULL_UP)
-        self.enc_b = Pin(enc_b_pin, Pin.IN, Pin.PULL_UP)
-        
-        # Attach Interrupt
-        self.enc_a.irq(trigger=Pin.IRQ_RISING, handler=self._enc_handler)
-
-    def _enc_handler(self, pin):
-        # A lightweight handler to minimize CPU interrupt time
-        val = self.enc_b.value()
-        if self.reverse_enc:
-            val = not val
-        if val:
-            self.ticks += 1
-        else:
-            self.ticks -= 1
-
-    def reset_ticks(self):
-        self.ticks = 0
-
-    def drive(self, speed):
-        # Apply the individual wheel bias
-        adjusted_speed = int(speed * self.power_bias)
-        adjusted_speed = max(-4095, min(4095, adjusted_speed))
-        
-        if adjusted_speed == 0:
-            self.hat.set_pin(self.in1, 0) 
-            self.hat.set_pin(self.in2, 0)
-            self.hat.set_pwm(self.pwm_pin, 0, 0)
-        elif adjusted_speed > 0:
-            self.hat.set_pin(self.in1, 0) 
-            self.hat.set_pin(self.in2, 1)
-            self.hat.set_pwm(self.pwm_pin, 0, adjusted_speed)
-        else:
-            self.hat.set_pin(self.in1, 1) 
-            self.hat.set_pin(self.in2, 0)
-            self.hat.set_pwm(self.pwm_pin, 0, abs(adjusted_speed))
-
-    def stop(self):
-        self.drive(0)
-
-
-# --- SETUP HARDWARE ---
+# --- I2C & MOTOR HAT SETUP ---
 i2c = I2C(0, sda=Pin(16), scl=Pin(17), freq=100000)
-hat = MotorHat(i2c)
+PCA9685_ADDR = 0x60
 
-# FIXED CROSS-MATCHED POWER & ENCODERS
-# Wheels: (ID, Hat, PWM, IN1, IN2, EncA, EncB, ReverseEncoder)
+def init_motor_hat():
+    try:
+        i2c.writeto_mem(PCA9685_ADDR, 0x00, b'\x20') 
+        time.sleep(0.05)
+        i2c.writeto_mem(PCA9685_ADDR, 0x01, b'\x04') 
+        print("STATUS: Motor Hat Initialized")
+    except OSError:
+        print("ERROR: Motor Hat communication failed")
 
-# M1 pairs Driver Port 8 with Encoder Pins 2 & 3
-m1 = Wheel(1, hat, 8, 10, 9,  0, 1,  False)  
-m2 = Wheel(2, hat, 13, 11, 12, 19, 18, False) 
-m3 = Wheel(3, hat, 2, 4, 3,  15, 14, True)    
-m4 = Wheel(4, hat, 7, 5, 6,  2, 3,  True)     
+def set_pwm(channel, on, off):
+    data = bytearray([on & 0xFF, on >> 8, off & 0xFF, off >> 8])
+    try:
+        i2c.writeto_mem(PCA9685_ADDR, 0x06 + 4 * channel, data)
+    except OSError:
+        pass
 
-wheels = [m1, m2, m3, m4]
+def set_pin(channel, state):
+    if state == 1: set_pwm(channel, 4096, 0) 
+    else: set_pwm(channel, 0, 4096) 
 
-# TUNE: Apply steering bias directly to the objects if needed
-m1.power_bias = 1.0
-m2.power_bias = 1.0
-m3.power_bias = 1.0
-m4.power_bias = 1.0
+def set_motor(motor_num, speed):
+    # Mapping based on your "Perfect Mapping"
+    pins = {1: (8,10,9), 2: (13,11,12), 3: (2,4,3), 4: (7,5,6)}
+    pwm_pin, in1_pin, in2_pin = pins[motor_num]
+    speed = max(-4095, min(4095, int(speed))) 
+    
+    if speed == 0:
+        set_pin(in1_pin, 0); set_pin(in2_pin, 0); set_pwm(pwm_pin, 0, 0)
+    elif speed > 0:
+        set_pin(in1_pin, 0); set_pin(in2_pin, 1); set_pwm(pwm_pin, 0, speed)
+    else:
+        set_pin(in1_pin, 1); set_pin(in2_pin, 0); set_pwm(pwm_pin, 0, abs(speed))
 
-# --- HELPER FUNCTIONS ---
-def stop_all():
-    for w in wheels:
-        w.stop()
+# --- ENCODER SETUP (UPDATED PINS) ---
+ticks = {1: 0, 2: 0, 3: 0, 4: 0}
 
-def reset_all_ticks():
-    for w in wheels:
-        w.reset_ticks()
+def make_handler(motor_id, pin_b, reverse_polarity=False):
+    def handler(pin):
+        val = pin_b.value()
+        if reverse_polarity: val = not val
+        if val: ticks[motor_id] += 1
+        else: ticks[motor_id] -= 1
+    return handler
 
-def print_telemetry():
-    print(f"TICKS | M1:{m1.ticks:>5} | M2:{m2.ticks:>5} | M3:{m3.ticks:>5} | M4:{m4.ticks:>5}")
+# M1: EncA=2, EncB=3, Rev=False
+m1_a = Pin(2, Pin.IN, Pin.PULL_UP); m1_b = Pin(3, Pin.IN, Pin.PULL_UP)
+m1_a.irq(trigger=Pin.IRQ_RISING, handler=make_handler(1, m1_b, False))
 
-# --- COMMAND PARSER ---
+# M2: EncA=19, EncB=18, Rev=False
+m2_a = Pin(19, Pin.IN, Pin.PULL_UP); m2_b = Pin(18, Pin.IN, Pin.PULL_UP)
+m2_a.irq(trigger=Pin.IRQ_RISING, handler=make_handler(2, m2_b, False))
+
+# M3: EncA=15, EncB=14, Rev=True
+m3_a = Pin(15, Pin.IN, Pin.PULL_UP); m3_b = Pin(14, Pin.IN, Pin.PULL_UP)
+m3_a.irq(trigger=Pin.IRQ_RISING, handler=make_handler(3, m3_b, True))
+
+# M4: EncA=0, EncB=1, Rev=True
+m4_a = Pin(0, Pin.IN, Pin.PULL_UP); m4_b = Pin(1, Pin.IN, Pin.PULL_UP)
+m4_a.irq(trigger=Pin.IRQ_RISING, handler=make_handler(4, m4_b, True))
+
 poll_obj = select.poll()
 poll_obj.register(sys.stdin, select.POLLIN)
 
-print("\n--- PICO ROBOTICS CORE ---")
-print("Commands available:")
-print("  TEST:1   -> Runs M1 only for 1 second (Tests hardware)")
-print("  DRIVE:1500 -> Drives all motors at PWM 1500 for 1 second")
-print("  STOP     -> Kills motors")
+def stop_all_motors():
+    for i in range(1, 5): set_motor(i, 0)
 
+# --- MOTION ENGINE ---
+def drive_distance(target_meters):
+    target_ticks = (target_meters / METERS_PER_TICK) * DISTANCE_MULTIPLIER
+    for i in range(1, 5): ticks[i] = 0 
+    
+    Kp, max_speed, min_speed, current_speed, accel_rate = 5.0, 1500, 800, 0, 50
+    print(f"Driving {target_meters}m...")
+    
+    while True:
+        if poll_obj.poll(0):
+            if sys.stdin.readline().strip() == "STOP": break
+
+        current_ticks = sorted([abs(t) for t in ticks.values()])
+        avg_ticks = (current_ticks[1] + current_ticks[2]) / 2.0
+        error = target_ticks - avg_ticks
+        
+        if abs(error) < 25: break
+            
+        desired_speed = error * Kp
+        current_speed = min(abs(desired_speed), current_speed + accel_rate)
+        output_pwm = min(max_speed, max(min_speed, current_speed))
+        final_pwm = output_pwm if error > 0 else -output_pwm
+
+        for i in range(1, 5):
+            power = final_pwm
+            if i == 1 or i == 3: power = int(final_pwm * 0.90) # Steering Bias
+            set_motor(i, power)
+        time.sleep(0.02) 
+
+    stop_all_motors()
+    print("Done.")
+
+def turn_robot(degrees):
+    arc_length = (math.pi * TRACK_WIDTH_M * abs(degrees)) / 360
+    target_ticks = (arc_length / METERS_PER_TICK) * DISTANCE_MULTIPLIER
+    for i in range(1, 5): ticks[i] = 0 
+    
+    Kp, max_speed, min_speed, current_speed, accel_rate = 5.0, 1500, 800, 0, 50
+    print(f"Turning {degrees} degrees...")
+    
+    while True:
+        if poll_obj.poll(0):
+            if sys.stdin.readline().strip() == "STOP": break
+
+        current_ticks = sorted([abs(t) for t in ticks.values()])
+        avg_ticks = (current_ticks[1] + current_ticks[2]) / 2.0
+        error = target_ticks - avg_ticks
+        
+        if abs(error) < 25: break
+            
+        desired_speed = error * Kp
+        current_speed = min(abs(desired_speed), current_speed + accel_rate)
+        output_pwm = min(max_speed, max(min_speed, current_speed))
+        final_pwm = output_pwm if degrees > 0 else -output_pwm
+
+        # Pivot: Right sides (1,2) opposite of Left sides (3,4)
+        set_motor(1, -final_pwm); set_motor(2, -final_pwm)
+        set_motor(3, final_pwm); set_motor(4, final_pwm)
+        time.sleep(0.02) 
+
+    stop_all_motors()
+
+# --- MAIN LOOP ---
+init_motor_hat()
 try:
     while True:
         if poll_obj.poll(0):
-            command = sys.stdin.readline().strip().upper()
-            
-            if command == "STOP":
-                stop_all()
-                print("Motors Stopped.")
-                
-            elif command.startswith("TEST:"):
-                # Run a single motor for diagnostic testing
-                motor_id = int(command.split(":")[1])
-                target_wheel = next((w for w in wheels if w.motor_id == motor_id), None)
-                
-                if target_wheel:
-                    reset_all_ticks()
-                    print(f"Testing M{motor_id} at 1500 PWM for 1 second...")
-                    target_wheel.drive(1500)
-                    time.sleep(1)
-                    target_wheel.stop()
-                    print_telemetry()
-                else:
-                    print("Invalid Motor ID")
-
-            elif command.startswith("DRIVE:"):
-                # Drive all motors for a short burst to check telemetry
-                pwm_val = int(command.split(":")[1])
-                reset_all_ticks()
-                print(f"Driving all motors at {pwm_val} for 1 second...")
-                for w in wheels:
-                    w.drive(pwm_val)
-                time.sleep(1)
-                stop_all()
-                print_telemetry()
-                
-        time.sleep(0.05)
-
+            cmd = sys.stdin.readline().strip()
+            if cmd.startswith("DRIVE:"):
+                drive_distance(float(cmd.split(":")[1]))
+            elif cmd.startswith("TURN:"):
+                turn_robot(float(cmd.split(":")[1]))
+            elif cmd == "STOP":
+                stop_all_motors()
+        time.sleep(0.1)
 except KeyboardInterrupt:
-    stop_all()
-    print("\nProgram exit.")
+    stop_all_motors()
