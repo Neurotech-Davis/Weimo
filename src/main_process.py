@@ -6,6 +6,7 @@ from ui.main_window import MainWindow
 from core.shared_state import SharedState
 from workers.eyetracker_worker import eyetracker_worker
 from workers.classifier_worker import classifier_worker
+from workers.eeg_recorder_worker import eeg_recorder_worker
 from workers.motor_worker import motor_worker
 from workers.pathfinding_worker import pathfinding_worker
 
@@ -13,6 +14,7 @@ import multiprocessing as mp
 
 
 def main():
+    record_eeg = "--record-eeg" in sys.argv
     shared_state = SharedState()  # all shared mem in one place
 
     # Daemon=true means they are killed when parent dies. This is desired UNLESS they have important cleanup in their "finally" block, like the motor worker which wants to shut off the car.
@@ -20,11 +22,14 @@ def main():
     p_classifier = mp.Process(
         target=classifier_worker, args=(shared_state,), daemon=True
     )
+    p_recorder = mp.Process(target=eeg_recorder_worker, args=(shared_state,))
     # p_motor = mp.Process(target=motor_worker, args=(shared_state,))
     # p_pathfinding = mp.Process(target=pathfinding_worker, args=(shared_state,), daemon=True)
 
     # process_arr = [p_tracker]
     process_arr = [p_tracker, p_classifier]
+    if record_eeg:
+        process_arr.append(p_recorder)
     # process_arr = [p_tracker, p_classifier, p_pathfinding, p_motor]
 
     for proc in process_arr:
