@@ -72,7 +72,7 @@ def preprocess_epoch(data: np.ndarray) -> torch.Tensor:
 # ── Signal quality check ──────────────────────────────────────────────────────
 
 
-REFERENCE_CHANNELS = {"Pz"}
+REFERENCE_CHANNELS = {"Pz", "TRG"}
 
 
 def check_signal_quality(data: np.ndarray, eeg_picks: list) -> bool:
