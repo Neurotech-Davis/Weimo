@@ -382,25 +382,20 @@ class MainWindow(QMainWindow):
             self._path_cap = cv2.VideoCapture(idx)
             self._current_path_idx = idx
 
-        ret, frame = False, None
-        if self._path_cap is not None and self._path_cap.isOpened():
-            ret, frame = self._path_cap.read()
+        ret, frame = self._path_cap.read()
 
-        if ret and self.mirrored:
-            frame = cv2.flip(frame, 1)
-        else:
-            # --- FALLBACK: Create a blank canvas if camera is offline ---
+        if not ret:
+            # fallback blank canvas
             h, w = self.shared_state.FRAME_H, self.shared_state.FRAME_W
             frame = np.zeros((h, w, 3), dtype=np.uint8)
-
-            # Put an offline indicator in the center
             text = f"Cam {idx} Offline"
             font = cv2.FONT_HERSHEY_SIMPLEX
             text_size = cv2.getTextSize(text, font, 1, 2)[0]
             text_x = (w - text_size[0]) // 2
             text_y = (h + text_size[1]) // 2
             cv2.putText(frame, text, (text_x, text_y), font, 1, (100, 100, 100), 2)
-
+        elif self.mirrored:
+            frame = cv2.flip(frame, 1)
         # --- ALWAYS Draw Gaze Dot ---
         gaze_x, gaze_y = self.shared_state.get_gaze()
         if gaze_x >= 0 and gaze_y >= 0:
