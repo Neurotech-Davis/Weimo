@@ -20,13 +20,6 @@ dist_usb = np.load(models_dir / "dist_usb.npy")
 
 FaceLandmarker = vision.FaceLandmarker
 FaceLandmarkerOptions = vision.FaceLandmarkerOptions
-options = FaceLandmarkerOptions(
-    base_options=python.BaseOptions(model_asset_path=model_path),
-    running_mode=vision.RunningMode.VIDEO,
-    output_face_blendshapes=True,
-    output_facial_transformation_matrixes=True,
-    num_faces=1,
-)
 model_points = np.array(
     [
         (0.0, 0.0, 0.0),  # Nose tip
@@ -51,13 +44,21 @@ BUILTIN_CAMERA_INDEX = 0
 def eyetracker_worker(shared_state):
     # SETUP
     shared_state.tracker_running.value = True
+
+    options = FaceLandmarkerOptions(
+        base_options=python.BaseOptions(model_asset_path=model_path),
+        running_mode=vision.RunningMode.VIDEO,
+        output_face_blendshapes=True,
+        output_facial_transformation_matrixes=True,
+        num_faces=1,
+    )
     landmarker = FaceLandmarker.create_from_options(options)
     CAMERA_INDEX = shared_state.camera_index.value
 
     prev_x, prev_y = 0, 0
 
     def open_camera(index):
-        cap = cv2.VideoCapture(index)
+        cap = cv2.VideoCapture(index, cv2.CAP_MSMF)
         if index == BUILTIN_CAMERA_INDEX:
             K, K_new, dist = cam_matrix_builtin, cam_matrix_new_builtin, dist_builtin
         else:

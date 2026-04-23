@@ -379,7 +379,7 @@ class MainWindow(QMainWindow):
         if self._path_cap is None or idx != self._current_path_idx:
             if self._path_cap is not None:
                 self._path_cap.release()
-            self._path_cap = cv2.VideoCapture(idx)
+            self._path_cap = cv2.VideoCapture(idx, cv2.CAP_MSMF)
             self._current_path_idx = idx
 
         ret, frame = self._path_cap.read()
