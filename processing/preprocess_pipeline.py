@@ -181,20 +181,53 @@ def extract_csp(n_components: int = 6):
     return extract
 
 
-def extract_tensor(scale: bool = True):
+def epoch_filter(bands: list[tuple], notch_freq: float = None, ref: str = None):
+    """Apply filtering/rereference per epoch (use INSTEAD of whole-file steps).
+
+    Add this step AFTER epoch() in the pipeline when per_epoch=True.
+    bands   — list of (l_freq, h_freq) tuples, same format as bandpass()
+    notch_freq — power-line frequency to notch, or None to skip
+    ref        — rereferencing scheme ('average', etc.), or None to skip
+    """
+    def apply(raw: mne.io.Raw) -> mne.io.Raw:
+        assert hasattr(raw, '_epochs'), "Add epoch() before epoch_filter()."
+        if notch_freq is not None:
+            data = raw._epochs.get_data()
+            data = mne.filter.notch_filter(data, Fs=raw._epochs.info['sfreq'], freqs=notch_freq, verbose=False)
+            raw._epochs._data = data
+        for l_freq, h_freq in bands:
+            raw._epochs.filter(l_freq=l_freq, h_freq=h_freq, verbose=False)
+        if ref is not None:
+            raw._epochs.set_eeg_reference(ref_channels=ref, projection=False, verbose=False)
+        return raw
+    apply._desc = f"epoch_filter(bands={bands}, notch_freq={notch_freq}, ref={ref!r})"
+    return apply
+
+
+def extract_tensor(scale: bool = True, per_epoch_scale: bool = True):
+    """Extract epoch data as a float32 tensor.
+
+    scale           — whether to z-score at all
+    per_epoch_scale — True (default): z-score each trial independently (per channel)
+                      False: z-score using global mean/std across all trials
+    """
     def extract(raw: mne.io.Raw):
         assert hasattr(raw, '_epochs'), "Add epoch() to the pipeline before extracting features."
         eeg_channels = _get_eeg_channels(raw)
         X = raw._epochs.get_data(picks=eeg_channels)
         y = raw._epochs.events[:, 2]
         if scale:
-            mean = X.mean(axis=-1, keepdims=True)
-            std  = X.std(axis=-1, keepdims=True) + 1e-8
+            if per_epoch_scale:
+                mean = X.mean(axis=-1, keepdims=True)          # (n_trials, n_ch, 1)
+                std  = X.std(axis=-1, keepdims=True) + 1e-8
+            else:
+                mean = X.mean(axis=(0, -1), keepdims=True)     # (1, n_ch, 1) — global
+                std  = X.std(axis=(0, -1), keepdims=True) + 1e-8
             X = (X - mean) / std
         X = X[:, np.newaxis, :, :].astype(np.float32)
-        print(f"[Tensor] shape: {X.shape}")
+        print(f"[Tensor] shape: {X.shape}  scale={'per-epoch' if per_epoch_scale else 'global'}")
         return X, y
-    extract._desc = f"extract_tensor(scale={scale})"
+    extract._desc = f"extract_tensor(scale={scale}, per_epoch_scale={per_epoch_scale})"
     return extract
 
 
