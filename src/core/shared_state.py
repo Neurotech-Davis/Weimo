@@ -29,7 +29,7 @@ class SharedState:
         if self.usb_is_main_cam:
             self.camera_index = mp.Value(ctypes.c_int, 64)
         else:
-            self.camera_index = mp.Value(ctypes.c_int, 0)
+            self.camera_index = mp.Value(ctypes.c_int, 1)
         self.smoothing_factor = mp.Value(ctypes.c_float, 0.5)
 
         ### -----------
@@ -60,7 +60,7 @@ class SharedState:
         ### Pathfinding
         ### -----------
         # UI -> Pathfinding
-        self.pathfinding_camera_index = mp.Value(ctypes.c_int, 1)
+        self.pathfinding_camera_index = mp.Value(ctypes.c_int, 0)
         # Pathfinding -> UI
         self.pathfinding_running = mp.Value(ctypes.c_bool, False)
         self.pathfinding_error = mp.Event()
