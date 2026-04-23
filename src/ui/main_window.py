@@ -87,6 +87,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._build_gaze_group())
         layout.addWidget(self._build_eyetracker_controls_group())
         layout.addWidget(self._build_motor_group())
+        layout.addWidget(self._build_pathfinding_group())
 
         if self.mock_classifier:
             layout.addWidget(self._build_mock_classifier_group())
@@ -168,7 +169,7 @@ class MainWindow(QMainWindow):
 
         cam_row.addWidget(QLabel("Eye:"))
         self._cam_spin = QSpinBox()
-        self._cam_spin.setRange(0, 10)
+        self._cam_spin.setRange(0, 100)
         self._cam_spin.setValue(self.shared_state.camera_index.value)
         self._cam_spin.setFixedWidth(55)
         self._cam_spin.valueChanged.connect(self._on_eyetracker_cam_changed)
@@ -178,7 +179,7 @@ class MainWindow(QMainWindow):
 
         cam_row.addWidget(QLabel("Path:"))
         self._path_cam_spin = QSpinBox()
-        self._path_cam_spin.setRange(0, 10)
+        self._path_cam_spin.setRange(0, 100)
         self._path_cam_spin.setValue(self.shared_state.pathfinding_camera_index.value)
         self._path_cam_spin.setFixedWidth(55)
         self._path_cam_spin.valueChanged.connect(self._on_pathfinding_cam_changed)
@@ -305,6 +306,21 @@ class MainWindow(QMainWindow):
 
         return box
 
+    # -- Pathfinding group
+
+    def _build_pathfinding_group(self) -> QGroupBox:
+        box = QGroupBox("Pathfinding")
+        layout = QVBoxLayout(box)
+
+        self._angle_dist_label = QLabel("→ --°  |  --mm")
+        self._obstacle_label = QLabel("Obstacle: --")
+
+        for lbl in (self._angle_dist_label, self._obstacle_label):
+            lbl.setStyleSheet("font-family: monospace; font-size: 12px;")
+            layout.addWidget(lbl)
+
+        return box
+
     # ------------------------------------------------------------------
     # Tick
     # ------------------------------------------------------------------
@@ -314,6 +330,7 @@ class MainWindow(QMainWindow):
         self._update_gaze_readout()
         self._update_worker_status()
         self._update_motor_readout()
+        self._update_pathfinding_readout()
         if not self.mock_classifier:
             self._update_classifier_readout()
 
@@ -432,6 +449,14 @@ class MainWindow(QMainWindow):
             self._target_label.setText(f"Target: {angle:+.1f}°  {dist:.0f}mm")
         else:
             self._target_label.setText("Target: --")
+
+    def _update_pathfinding_readout(self):
+        angle = self.shared_state.target_angle.value
+        dist = self.shared_state.target_dist.value
+        obs = self.shared_state.obstacle_detected.value
+
+        self._angle_dist_label.setText(f"→ {angle:+.1f}°  |  {dist:.0f}mm")
+        self._obstacle_label.setText(f"Obstacle: {'⚠ YES' if obs else 'clear'}")
 
     # ------------------------------------------------------------------
     # Callbacks

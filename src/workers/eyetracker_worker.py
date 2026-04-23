@@ -40,7 +40,8 @@ model_points = np.array(
 )
 
 
-SENSITIVITY = 60
+SENSITIVITY_X = 60
+SENSITIVITY_Y = 40
 PITCH_OFFSET = 0  # Adjust if cursor is too high/low when looking center
 YAW_OFFSET = 0
 # Define this so that the correct matrix is loaded
@@ -57,7 +58,7 @@ def eyetracker_worker(shared_state):
 
     def open_camera(index):
         cap = cv2.VideoCapture(index)
-        if index != BUILTIN_CAMERA_INDEX:
+        if index == BUILTIN_CAMERA_INDEX:
             K, K_new, dist = cam_matrix_builtin, cam_matrix_new_builtin, dist_builtin
         else:
             K, K_new, dist = cam_matrix_usb, cam_matrix_new_usb, dist_usb
@@ -81,7 +82,7 @@ def eyetracker_worker(shared_state):
             # print("[eyetracker_worker] Error reading from camera")
             time.sleep(1)
             continue
-        
+
         frame = cv2.undistort(frame, K, dist, None, K_new)
         h, w, _ = frame.shape
         rgb_frame = mp.Image(
@@ -128,8 +129,8 @@ def eyetracker_worker(shared_state):
             pitch = pitch - 180 if pitch > 0 else pitch + 180
 
             # 4. Map Rotation to Normalised Coordinates (0.0 - 1.0)
-            target_x = 0.5 + (yaw - YAW_OFFSET) / (SENSITIVITY)
-            target_y = 0.5 + (pitch - PITCH_OFFSET) / (SENSITIVITY)
+            target_x = 0.5 + (yaw - YAW_OFFSET) / (SENSITIVITY_X)
+            target_y = 0.5 + (pitch - PITCH_OFFSET) / (SENSITIVITY_Y)
 
             # 5. Exponential Moving Average Smoothing
             curr_x = prev_x + (target_x - prev_x) * SMOOTHING

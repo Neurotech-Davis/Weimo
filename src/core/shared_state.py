@@ -1,3 +1,4 @@
+import sys
 import multiprocessing as mp
 import ctypes
 
@@ -5,6 +6,7 @@ import ctypes
 class SharedState:
     FRAME_W = 640
     FRAME_H = 480
+    usb_is_main_cam = "--usb-main" in sys.argv
 
     def __init__(self):
         # global, defines termination
@@ -24,7 +26,10 @@ class SharedState:
         self.frame_ready = mp.Event()
 
         # eyetracker params (UI -> eyetracker)
-        self.camera_index = mp.Value(ctypes.c_int, 0)
+        if self.usb_is_main_cam:
+            self.camera_index = mp.Value(ctypes.c_int, 64)
+        else:
+            self.camera_index = mp.Value(ctypes.c_int, 0)
         self.smoothing_factor = mp.Value(ctypes.c_float, 0.5)
 
         ### -----------

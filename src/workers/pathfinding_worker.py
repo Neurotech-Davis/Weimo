@@ -51,7 +51,10 @@ def pathfinding_worker(shared_state):
                 h_angle, dist = screen_to_location.pixel_to_point(px, py, K, cam_cfg)
                 shared_state.target_angle.value = float(h_angle)
                 shared_state.target_dist.value = float(dist)
-
+            else:
+                # no face detected — clear target so motor doesn't act on stale values
+                shared_state.target_angle.value = 0.0
+                shared_state.target_dist.value = 0.0
             time.sleep(0.05)
 
     # TEARDOWN
