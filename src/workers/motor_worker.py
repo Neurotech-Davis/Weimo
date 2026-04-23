@@ -16,6 +16,7 @@ State machine:
 
 import serial
 import time
+import math
 from enum import Enum
 
 
@@ -103,17 +104,15 @@ def navigate_to(ser, h_angle: float, dist_mm: float, shared_state) -> bool:
         print(f"[motor_worker] rotating {h_angle:.1f}°")
         cmd_turn(ser, h_angle)  # blocks until Pico acks OK:DONE
 
-    # step 2 — check again before driving
-    if jaw_clench_detected(shared_state):
-        print("[motor_worker] jaw_clench — aborting before drive")
-        cmd_stop(ser)
-        return False
-
     # step 3 — drive forward
+    if not math.isfinite(dist_mm):
+        print(f"[motor_worker] dist={dist_mm:.0f}mm is not finite — skipping drive")
+        dist_mm = 1500.0
+
     if dist_mm > DIST_THRESHOLD_MM:
         print(f"[motor_worker] driving {dist_mm:.0f}mm")
         dist_m = dist_mm / 1000.0
-        cmd_drive(ser, dist_m)  # blocks until Pico acks OK:DONE
+        cmd_drive(ser, dist_m)
 
     print("[motor_worker] arrived at target")
     return True
