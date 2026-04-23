@@ -47,14 +47,12 @@ ZONE_DWELL_SEC = 0.5  # how long gaze must dwell before activating
 
 # zone definitions: (y_min, y_max, turn_degrees)
 TURN_ZONES_LEFT = [
-    (0.0, 0.33, -45),  # top left    → 45° CCW
-    (0.33, 0.66, -90),  # mid left    → 90° CCW
-    (0.66, 1.0, -135),  # bottom left → 135° CCW
+    (0.0, 0.25, -45),  # top left    → 45° CCW
+    (0.75, 1.0, -90),  # bottom left → 135° CCW
 ]
 TURN_ZONES_RIGHT = [
-    (0.0, 0.33, 45),  # top right    → 45° CW
-    (0.33, 0.66, 90),  # mid right    → 90° CW
-    (0.66, 1.0, 135),  # bottom right → 135° CW
+    (0.0, 0.25, 45),  # top right    → 45° CW
+    (0.75, 1.0, 135),  # bottom right → 135° CW
 ]
 
 
