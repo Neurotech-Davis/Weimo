@@ -29,9 +29,9 @@ CONFIGS = {
     "STRIDE_SEC": 1,
     "LEAD_IN": 2,
 }
-CONFIGS["N_TIMEPOINTS"] = int(CONFIGS["SFREQ"] * CONFIGS["TRIAL_DUR"])
+CONFIGS["N_TIMEPOINTS"] = int(CONFIGS["SFREQ"] * CONFIGS["TRIAL_DUR"]) + 1  # MNE tmax inclusive → 901
 
-MODEL_PATH = "./models/DeepConvNet2.pt"
+MODEL_PATH = "./models/DeepConvNet_per_epoch.pt"
 STREAM_NAME = "WS-default"
 
 
@@ -44,7 +44,7 @@ def preprocess_epoch(data: np.ndarray) -> torch.Tensor:
     Channel order must match training:
       ['EEG LE-Pz', 'EEG F4-Pz', 'EEG C4-Pz', 'EEG P4-Pz',
        'EEG P3-Pz', 'EEG C3-Pz', 'EEG F3-Pz', 'Pz']
-    Returns: (1, 1, 8, 900) float32 tensor
+    Returns: (1, 1, 8, 901) float32 tensor
     """
     # data = data - data.mean(axis=-1, keepdims=True)
     # data[7, :] = 0.0
@@ -62,8 +62,8 @@ def preprocess_epoch(data: np.ndarray) -> torch.Tensor:
     info = mne.create_info(ch_names=ch_names, sfreq=CONFIGS["SFREQ"], ch_types="eeg")
     raw = mne.io.RawArray(data, info, verbose=False)
 
-    raw.notch_filter(60.0, method="iir", verbose=False)
-    raw.filter(13, 30.0, method="iir", verbose=False)
+    raw.notch_filter(60.0, verbose=False)
+    raw.filter(13, 30.0, verbose=False)
     raw.set_eeg_reference(ref_channels="average", verbose=False)
 
     X = raw.get_data()[:, -CONFIGS["N_TIMEPOINTS"] :]  # clip to exactly 900
