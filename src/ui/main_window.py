@@ -371,7 +371,7 @@ class MainWindow(QMainWindow):
 
         self._display_frame(frame)
 
-    def _render_pathfinding_local_feed(self):
+    def _render_pathfinding_feed(self):
         """Directly opens and reads from the USB camera in the UI thread."""
         idx = self.shared_state.pathfinding_camera_index.value
 
