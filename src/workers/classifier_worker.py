@@ -27,6 +27,7 @@ CONFIGS = {
     "TRIAL_DUR": 3,
     "SFREQ": 300,
     "STRIDE_SEC": 1,
+    "LEAD_IN": 2,
 }
 CONFIGS["N_TIMEPOINTS"] = int(CONFIGS["SFREQ"] * CONFIGS["TRIAL_DUR"])
 
@@ -45,6 +46,9 @@ def preprocess_epoch(data: np.ndarray) -> torch.Tensor:
        'EEG P3-Pz', 'EEG C3-Pz', 'EEG F3-Pz', 'Pz']
     Returns: (1, 1, 8, 900) float32 tensor
     """
+    # data = data - data.mean(axis=-1, keepdims=True)
+    # data[7, :] = 0.0
+
     ch_names = [
         "EEG LE-Pz",
         "EEG F4-Pz",
@@ -59,10 +63,10 @@ def preprocess_epoch(data: np.ndarray) -> torch.Tensor:
     raw = mne.io.RawArray(data, info, verbose=False)
 
     raw.notch_filter(60.0, method="iir", verbose=False)
-    raw.filter(8.0, 30.0, method="iir", verbose=False)
+    raw.filter(13, 30.0, method="iir", verbose=False)
     raw.set_eeg_reference(ref_channels="average", verbose=False)
 
-    X = raw.get_data()[:, : CONFIGS["N_TIMEPOINTS"]]  # clip to exactly 900
+    X = raw.get_data()[:, -CONFIGS["N_TIMEPOINTS"] :]  # clip to exactly 900
     mean = X.mean(axis=-1, keepdims=True)
     std = X.std(axis=-1, keepdims=True) + 1e-8
     X = (X - mean) / std
@@ -103,7 +107,8 @@ def attempt_LSL_connection(max_retries: int, retry_delay: int):
     for attempt in range(1, max_retries + 1):
         try:
             stream = StreamLSL(
-                bufsize=CONFIGS["TRIAL_DUR"] + 1.0, name=STREAM_NAME
+                bufsize=CONFIGS["TRIAL_DUR"] + CONFIGS["LEAD_IN"] + 1.0,
+                name=STREAM_NAME,
             ).connect()
             print(f"[classifier_worker] Connected on attempt {attempt}.")
             break
@@ -167,7 +172,7 @@ def classifier_worker(shared_state):
             t_start = time.perf_counter()
 
             data, timestamps = stream.get_data(
-                winsize=CONFIGS["TRIAL_DUR"],
+                winsize=CONFIGS["TRIAL_DUR"] + CONFIGS["LEAD_IN"],
                 picks=eeg_picks,
             )
 

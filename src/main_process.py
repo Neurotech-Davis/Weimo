@@ -24,14 +24,14 @@ def main():
         target=classifier_worker, args=(shared_state,), daemon=True
     )
     p_recorder = mp.Process(target=eeg_recorder_worker, args=(shared_state,))
-    # p_motor = mp.Process(target=motor_worker, args=(shared_state,))
+    p_motor = mp.Process(target=motor_worker, args=(shared_state,))
     p_pathfinding = mp.Process(
         target=pathfinding_worker, args=(shared_state,), daemon=True
     )
 
-    process_arr = [p_tracker]
-    process_arr = [p_tracker, p_pathfinding]
-    # process_arr = [p_tracker, p_pathfinding, p_motor]
+    # process_arr = [p_tracker]
+    # process_arr = [p_tracker, p_pathfinding]
+    process_arr = [p_tracker, p_pathfinding, p_motor]
     if record_eeg:
         process_arr.append(p_recorder)
 
