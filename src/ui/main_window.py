@@ -12,6 +12,7 @@ Right panel sections:
   - Motor Controls    : command buttons + state readout
 """
 
+import time
 import cv2
 import numpy as np
 from PyQt6.QtWidgets import (
@@ -39,6 +40,23 @@ MOCK_STATE_STYLES = {
     2: ("JAW CLENCH", "#cc8800"),
 }
 
+# constants at top of main_window.py
+ZONE_WIDTH = 0.15  # 15% of frame width
+ZONE_HEIGHT = 0.25  # each zone is 25% of frame height
+ZONE_DWELL_SEC = 0.5  # how long gaze must dwell before activating
+
+# zone definitions: (y_min, y_max, turn_degrees)
+TURN_ZONES_LEFT = [
+    (0.0, 0.33, -45),  # top left    → 45° CCW
+    (0.33, 0.66, -90),  # mid left    → 90° CCW
+    (0.66, 1.0, -135),  # bottom left → 135° CCW
+]
+TURN_ZONES_RIGHT = [
+    (0.0, 0.33, 45),  # top right    → 45° CW
+    (0.33, 0.66, 90),  # mid right    → 90° CW
+    (0.66, 1.0, 135),  # bottom right → 135° CW
+]
+
 
 class MainWindow(QMainWindow):
     def __init__(self, shared_state, mock_classifier=False):
@@ -52,6 +70,11 @@ class MainWindow(QMainWindow):
 
         self._path_cap = None
         self._current_path_idx = self.shared_state.pathfinding_camera_index.value
+
+        self._path_cap = None
+        self._current_path_idx = None
+        self._zone_dwell_start = None
+        self._zone_active_deg = None
 
         self._build_ui()
 
@@ -337,6 +360,9 @@ class MainWindow(QMainWindow):
         if not self.mock_classifier:
             self._update_classifier_readout()
 
+        gaze_x, gaze_y = self.shared_state.get_gaze()
+        self._check_turn_zones(gaze_x, gaze_y)
+
     def _update_feed(self):
         if self._active_feed == FEED_EYETRACKER:
             if self._path_cap is not None:
@@ -345,6 +371,63 @@ class MainWindow(QMainWindow):
             self._render_eyetracker_feed()
         else:
             self._render_pathfinding_feed()
+
+    def _draw_turn_zones(
+        self, frame: np.ndarray, gaze_x: float, gaze_y: float
+    ) -> np.ndarray:
+        """Draw turn zones onto a frame. Works for both feeds."""
+        h, w = frame.shape[:2]
+        zone_w_px = int(ZONE_WIDTH * w)
+
+        # compute dwell progress 0.0 → 1.0
+        dwell_progress = 0.0
+        if self._zone_dwell_start is not None and self._zone_active_deg is not None:
+            dwell_progress = min(
+                1.0, (time.time() - self._zone_dwell_start) / ZONE_DWELL_SEC
+            )
+
+        all_zones = [
+            # (x_start, x_end, y_min_norm, y_max_norm, degrees)
+            (0, zone_w_px, *z[:2], z[2])
+            for z in TURN_ZONES_LEFT
+        ] + [(w - zone_w_px, w, *z[:2], z[2]) for z in TURN_ZONES_RIGHT]
+
+        for x1, x2, y_min, y_max, deg in all_zones:
+            y1 = int(y_min * h)
+            y2 = int(y_max * h)
+            is_active = self._zone_active_deg == deg
+
+            # base zone rectangle
+            base_color = (0, 180, 255) if is_active else (80, 80, 80)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), base_color, 2)
+
+            # dwell progress bar — fills from bottom of zone upward
+            if is_active and dwell_progress > 0:
+                bar_h = int((y2 - y1) * dwell_progress)
+                bar_color = (0, 255, 150) if dwell_progress < 1.0 else (0, 255, 0)
+                cv2.rectangle(frame, (x1 + 2, y2 - bar_h), (x2 - 2, y2), bar_color, -1)
+                # redraw border on top of fill
+                cv2.rectangle(frame, (x1, y1), (x2, y2), base_color, 2)
+
+            # label
+            label = f"{abs(deg)}°"
+            direction = "L" if deg < 0 else "R"
+            text = f"{direction}{label}"
+            font_scale = 0.45
+            thickness = 1
+            text_x = x1 + 4
+            text_y = y1 + 18
+            cv2.putText(
+                frame,
+                text,
+                (text_x, text_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                font_scale,
+                (255, 255, 255),
+                thickness,
+            )
+
+        return frame
 
     def _render_eyetracker_feed(self):
         if not self.shared_state.frame_ready.is_set():
@@ -362,6 +445,11 @@ class MainWindow(QMainWindow):
             frame = cv2.flip(frame, 1)
 
         gaze_x, gaze_y = self.shared_state.get_gaze()
+
+        # draw zones first (behind gaze dot)
+        frame = self._draw_turn_zones(frame, gaze_x, gaze_y)
+
+        # gaze dot on top
         if gaze_x >= 0 and gaze_y >= 0:
             h, w = frame.shape[:2]
             cx = int(gaze_x * w)
@@ -372,10 +460,7 @@ class MainWindow(QMainWindow):
         self._display_frame(frame)
 
     def _render_pathfinding_feed(self):
-        """Directly opens and reads from the USB camera in the UI thread."""
         idx = self.shared_state.pathfinding_camera_index.value
-
-        # Initialize or Re-initialize if index changed
         if self._path_cap is None or idx != self._current_path_idx:
             if self._path_cap is not None:
                 self._path_cap.release()
@@ -383,23 +468,31 @@ class MainWindow(QMainWindow):
             self._current_path_idx = idx
 
         ret, frame = self._path_cap.read()
-
         if not ret:
-            # fallback blank canvas
             h, w = self.shared_state.FRAME_H, self.shared_state.FRAME_W
             frame = np.zeros((h, w, 3), dtype=np.uint8)
             text = f"Cam {idx} Offline"
             font = cv2.FONT_HERSHEY_SIMPLEX
             text_size = cv2.getTextSize(text, font, 1, 2)[0]
-            text_x = (w - text_size[0]) // 2
-            text_y = (h + text_size[1]) // 2
-            cv2.putText(frame, text, (text_x, text_y), font, 1, (100, 100, 100), 2)
+            cv2.putText(
+                frame,
+                text,
+                ((w - text_size[0]) // 2, (h + text_size[1]) // 2),
+                font,
+                1,
+                (100, 100, 100),
+                2,
+            )
         elif self.mirrored:
             frame = cv2.flip(frame, 1)
-        # --- ALWAYS Draw Gaze Dot ---
+
         gaze_x, gaze_y = self.shared_state.get_gaze()
+
+        # zones are PRIMARY display here — draw first
+        frame = self._draw_turn_zones(frame, gaze_x, gaze_y)
+
+        # gaze dot on top
         if gaze_x >= 0 and gaze_y >= 0:
-            # Recalculate h, w in case the camera returned a different resolution
             h, w = frame.shape[:2]
             cx = int(gaze_x * w)
             cy = int(gaze_y * h)
@@ -480,6 +573,53 @@ class MainWindow(QMainWindow):
 
         self._angle_dist_label.setText(f"→ {angle:+.1f}°  |  {dist:.0f}mm")
         self._obstacle_label.setText(f"Obstacle: {'⚠ YES' if obs else 'clear'}")
+
+    def _check_turn_zones(self, gaze_x: float, gaze_y: float):
+        """Check if gaze is dwelling in a turn zone."""
+        if gaze_x < 0 or gaze_y < 0:
+            self._zone_dwell_start = None
+            self._zone_active_deg = None
+            return
+
+        matched_deg = None
+
+        # check left zones
+        if gaze_x <= ZONE_WIDTH:
+            for y_min, y_max, deg in TURN_ZONES_LEFT:
+                if y_min <= gaze_y <= y_max:
+                    matched_deg = deg
+                    break
+
+        # check right zones
+        elif gaze_x >= (1.0 - ZONE_WIDTH):
+            for y_min, y_max, deg in TURN_ZONES_RIGHT:
+                if y_min <= gaze_y <= y_max:
+                    matched_deg = deg
+                    break
+
+        if matched_deg is not None:
+            if self._zone_active_deg != matched_deg:
+                # entered a new zone — reset dwell timer
+                self._zone_dwell_start = time.time()
+                self._zone_active_deg = matched_deg
+            else:
+                # same zone — check dwell time
+                dwell = time.time() - self._zone_dwell_start
+                if dwell >= ZONE_DWELL_SEC:
+                    # only trigger on MOVE prediction
+                    if (
+                        self.shared_state.prediction.value == 1
+                        and self.shared_state.pred_confidence.value >= 0.95
+                    ):
+                        print(f"[UI] zone turn triggered: {matched_deg}°")
+                        self.shared_state.turn_command.value = float(matched_deg)
+                        self.shared_state.prediction.value = 0  # consume
+                        self._zone_dwell_start = (
+                            time.time()
+                        )  # reset to avoid re-trigger
+        else:
+            self._zone_dwell_start = None
+            self._zone_active_deg = None
 
     # ------------------------------------------------------------------
     # Callbacks

@@ -15,14 +15,16 @@ TRACK_WIDTH_M = 0.125
 i2c = I2C(0, sda=Pin(16), scl=Pin(17), freq=100000)
 PCA9685_ADDR = 0x60
 
+
 def init_motor_hat():
     try:
-        i2c.writeto_mem(PCA9685_ADDR, 0x00, b'\x20')
+        i2c.writeto_mem(PCA9685_ADDR, 0x00, b"\x20")
         time.sleep(0.05)
-        i2c.writeto_mem(PCA9685_ADDR, 0x01, b'\x04')
+        i2c.writeto_mem(PCA9685_ADDR, 0x01, b"\x04")
         print("STATUS: Motor Hat Initialized")
     except OSError:
         print("ERROR: Motor Hat communication failed")
+
 
 def set_pwm(channel, on, off):
     data = bytearray([on & 0xFF, on >> 8, off & 0xFF, off >> 8])
@@ -31,11 +33,13 @@ def set_pwm(channel, on, off):
     except OSError:
         pass
 
+
 def set_pin(channel, state):
     if state == 1:
         set_pwm(channel, 4096, 0)
     else:
         set_pwm(channel, 0, 4096)
+
 
 def set_motor(motor_num, speed):
     pins = {1: (8, 10, 9), 2: (13, 11, 12), 3: (2, 4, 3), 4: (7, 5, 6)}
@@ -55,8 +59,10 @@ def set_motor(motor_num, speed):
         set_pin(in2_pin, 0)
         set_pwm(pwm_pin, 0, abs(speed))
 
+
 # --- ENCODER SETUP ---
 ticks = {1: 0, 2: 0, 3: 0, 4: 0}
+
 
 def make_handler(motor_id, pin_b, reverse_polarity=False):
     def handler(pin):
@@ -67,7 +73,9 @@ def make_handler(motor_id, pin_b, reverse_polarity=False):
             ticks[motor_id] += 1
         else:
             ticks[motor_id] -= 1
+
     return handler
+
 
 # M1: EncA=2, EncB=3
 m1_a = Pin(2, Pin.IN, Pin.PULL_UP)
@@ -92,14 +100,17 @@ m4_a.irq(trigger=Pin.IRQ_RISING, handler=make_handler(4, m4_b, True))
 poll_obj = select.poll()
 poll_obj.register(sys.stdin, select.POLLIN)
 
+
 def stop_all_motors():
     for i in range(1, 5):
         set_motor(i, 0)
+
 
 # --- ROBUST TICK AVERAGE ---
 def robust_avg_ticks():
     vals = sorted([abs(ticks[i]) for i in range(1, 5)])
     return (vals[1] + vals[2]) / 2.0
+
 
 # --- DEMO-DAY DYNAMIC SCALING ---
 def get_drive_multiplier(target_meters):
@@ -124,18 +135,19 @@ def get_drive_multiplier(target_meters):
         return 0.45
     else:
         return 0.39
-    
+
 
 def get_turn_multiplier(degrees):
-    # Turns behave differently mechanically. 
+    # Turns behave differently mechanically.
     # Testing proved a 1.0 multiplier yields between 45 and 55 degrees.
     return 0.90
+
 
 # --- MOTION ENGINE ---
 def drive_distance(target_meters):
     current_multiplier = get_drive_multiplier(target_meters)
     target_ticks = (target_meters / METERS_PER_TICK) * current_multiplier
-    
+
     for i in range(1, 5):
         ticks[i] = 0
 
@@ -144,10 +156,12 @@ def drive_distance(target_meters):
     min_speed = 800
     accel_rate = 50
     current_speed = 0
-    loop_count = 0                          
+    loop_count = 0
 
     direction = 1 if target_meters >= 0 else -1
-    print(f"Driving {target_meters}m (target={target_ticks:.0f} ticks, multiplier={current_multiplier})...")
+    print(
+        f"Driving {target_meters}m (target={target_ticks:.0f} ticks, multiplier={current_multiplier})..."
+    )
 
     while True:
         if poll_obj.poll(0):
@@ -155,7 +169,7 @@ def drive_distance(target_meters):
                 break
 
         avg_ticks = robust_avg_ticks()
-        error = target_ticks - avg_ticks    
+        error = target_ticks - avg_ticks
 
         loop_count += 1
         if loop_count % 5 == 0:
@@ -169,27 +183,28 @@ def drive_distance(target_meters):
             break
 
         desired_speed = min(max_speed, error * Kp)
-        current_speed = min(desired_speed, current_speed + accel_rate)  
+        current_speed = min(desired_speed, current_speed + accel_rate)
         output_pwm = max(min_speed, current_speed)
-        final_pwm = output_pwm * direction  
+        final_pwm = output_pwm * direction
 
         for i in range(1, 5):
             power = final_pwm
             # Gentle 5% bias to the right side (M1 & M2)
             if i == 1 or i == 2:
-                power = int(final_pwm * 0.95)   
+                power = int(final_pwm * 0.95)
             set_motor(i, power)
 
         time.sleep(0.02)
 
     stop_all_motors()
-    print("Done.")
+    print("OK:DONE")
+
 
 def turn_robot(degrees):
     arc_length = (math.pi * TRACK_WIDTH_M * abs(degrees)) / 360
     current_multiplier = get_turn_multiplier(degrees)
     target_ticks = (arc_length / METERS_PER_TICK) * current_multiplier
-    
+
     for i in range(1, 5):
         ticks[i] = 0
 
@@ -198,9 +213,11 @@ def turn_robot(degrees):
     min_speed = 800
     accel_rate = 50
     current_speed = 0
-    loop_count = 0                          
+    loop_count = 0
 
-    print(f"Turning {degrees} degrees (target={target_ticks:.0f} ticks, multiplier={current_multiplier})...")
+    print(
+        f"Turning {degrees} degrees (target={target_ticks:.0f} ticks, multiplier={current_multiplier})..."
+    )
 
     while True:
         if poll_obj.poll(0):
@@ -222,24 +239,25 @@ def turn_robot(degrees):
             break
 
         desired_speed = min(max_speed, error * Kp)
-        current_speed = min(desired_speed, current_speed + accel_rate)  
+        current_speed = min(desired_speed, current_speed + accel_rate)
         output_pwm = max(min_speed, current_speed)
 
         if degrees > 0:
             set_motor(1, -output_pwm)
             set_motor(2, -output_pwm)
-            set_motor(3,  output_pwm)
-            set_motor(4,  output_pwm)
+            set_motor(3, output_pwm)
+            set_motor(4, output_pwm)
         else:
-            set_motor(1,  output_pwm)
-            set_motor(2,  output_pwm)
+            set_motor(1, output_pwm)
+            set_motor(2, output_pwm)
             set_motor(3, -output_pwm)
             set_motor(4, -output_pwm)
 
         time.sleep(0.02)
 
     stop_all_motors()
-    print("Done.")
+    print("OK:DONE")
+
 
 # --- MAIN LOOP ---
 init_motor_hat()
@@ -253,6 +271,8 @@ try:
                 turn_robot(float(cmd.split(":")[1]))
             elif cmd == "STOP":
                 stop_all_motors()
+                print("OK:STOPPED")
         time.sleep(0.1)
 except KeyboardInterrupt:
     stop_all_motors()
+

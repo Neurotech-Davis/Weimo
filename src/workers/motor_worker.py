@@ -23,7 +23,7 @@ PICO_PORT = "COM8"  # Windows: COM3 etc.
 BAUD_RATE = 115200
 
 MOVE_CONFIDENCE_THRESHOLD = 0.95
-DIST_THRESHOLD_M = 0.150
+DIST_THRESHOLD_MM = 150
 ANGLE_THRESHOLD_DEG = 10.0
 
 
@@ -50,13 +50,18 @@ def connect(port: str, baud: int, retries: int = 5) -> serial.Serial:
 def send(ser: serial.Serial, cmd: str) -> str:
     """Send command, block until Pico acks."""
     ser.write((cmd + "\n").encode())
-    try:
-        ack = ser.readline().decode().strip()
-        print(f"[motor_worker] sent={cmd!r}  ack={ack!r}")
-        return ack
-    except Exception as e:
-        print(f"[motor_worker] ack read failed: {e}")
-        return ""
+    deadline = time.time() + 30.0
+    while time.time() < deadline:
+        try:
+            line = ser.readline().decode().strip()
+            print(f"[motor_worker] pico: {line}")
+            if line in ("OK:DONE", "OK:STOPPED"):
+                return line
+        except Exception as e:
+            print(f"[motor_worker] read error: {e}")
+            return ""
+    print("[motor_worker] ⚠ timeout waiting for ack")
+    return ""
 
 
 def cmd_stop(ser):
@@ -67,8 +72,8 @@ def cmd_turn(ser, angle_deg: float) -> str:
     return send(ser, f"TURN:{angle_deg:.1f}")
 
 
-def cmd_drive(ser, dist_mm: float) -> str:
-    return send(ser, f"DRIVE:{dist_mm:.0f}")
+def cmd_drive(ser, dist_m: float) -> str:
+    return send(ser, f"DRIVE:{dist_m:.3f}")
 
 
 # ── Jaw clench check — call between blocking operations ───────────────────────
@@ -105,9 +110,10 @@ def navigate_to(ser, h_angle: float, dist_mm: float, shared_state) -> bool:
         return False
 
     # step 3 — drive forward
-    if dist_mm > DIST_THRESHOLD_M:
+    if dist_mm > DIST_THRESHOLD_MM:
         print(f"[motor_worker] driving {dist_mm:.0f}mm")
-        cmd_drive(ser, dist_mm)  # blocks until Pico acks OK:DONE
+        dist_m = dist_mm / 1000.0
+        cmd_drive(ser, dist_m)  # blocks until Pico acks OK:DONE
 
     print("[motor_worker] arrived at target")
     return True
@@ -151,6 +157,19 @@ def motor_worker(shared_state):
                 time.sleep(0.05)
                 continue
 
+            # ── turn zone command ──
+            turn_deg = shared_state.turn_command.value
+            if state == MotorState.IDLE and turn_deg != 0.0:
+                shared_state.turn_command.value = 0.0  # consume immediately
+                state = MotorState.DRIVING
+                shared_state.motor_state.value = 1
+                print(f"[motor_worker] IDLE → DRIVING (zone turn {turn_deg}°)")
+                cmd_turn(ser, turn_deg)
+                state = MotorState.IDLE
+                shared_state.motor_state.value = 0
+                print(f"[motor_worker] DRIVING → IDLE (turn complete)")
+                continue
+
             # ── state machine ──
             if state == MotorState.IDLE:
                 pred = shared_state.prediction.value
@@ -162,7 +181,7 @@ def motor_worker(shared_state):
                     dist = shared_state.target_dist.value
                     shared_state.prediction.value = 0  # consume
 
-                    if dist > DIST_THRESHOLD_M:
+                    if dist > DIST_THRESHOLD_MM:
                         state = MotorState.DRIVING
                         shared_state.motor_state.value = 1
                         print(f"[motor_worker] IDLE → DRIVING")

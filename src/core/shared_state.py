@@ -55,6 +55,9 @@ class SharedState:
         self.motor_state = mp.Value(ctypes.c_int, 0)
         self.motor_running = mp.Value(ctypes.c_bool, False)
         self.motor_error = mp.Event()
+        # Motor <-> UI
+        # shared_state.py
+        self.turn_command = mp.Value(ctypes.c_float, 0.0)  # 0 = no turn, else degrees
 
         ### -----------
         ### Pathfinding
