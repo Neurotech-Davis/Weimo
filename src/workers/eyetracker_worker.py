@@ -57,7 +57,7 @@ def eyetracker_worker(shared_state):
 
     def open_camera(index):
         cap = cv2.VideoCapture(index)
-        if index == BUILTIN_CAMERA_INDEX:
+        if index != BUILTIN_CAMERA_INDEX:
             K, K_new, dist = cam_matrix_builtin, cam_matrix_new_builtin, dist_builtin
         else:
             K, K_new, dist = cam_matrix_usb, cam_matrix_new_usb, dist_usb
