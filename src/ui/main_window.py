@@ -174,17 +174,17 @@ class MainWindow(QMainWindow):
         self._cam_spin = QSpinBox()
         self._cam_spin.setRange(0, 100)
         self._cam_spin.setValue(self.shared_state.camera_index.value)
-        self._cam_spin.setFixedWidth(55)
+        self._cam_spin.setFixedWidth(75)
         self._cam_spin.valueChanged.connect(self._on_eyetracker_cam_changed)
         cam_row.addWidget(self._cam_spin)
 
-        cam_row.addSpacing(10)
+        cam_row.addSpacing(20)  # Increased from 10
 
         cam_row.addWidget(QLabel("Path:"))
         self._path_cam_spin = QSpinBox()
         self._path_cam_spin.setRange(0, 100)
         self._path_cam_spin.setValue(self.shared_state.pathfinding_camera_index.value)
-        self._path_cam_spin.setFixedWidth(55)
+        self._path_cam_spin.setFixedWidth(75)
         self._path_cam_spin.valueChanged.connect(self._on_pathfinding_cam_changed)
         cam_row.addWidget(self._path_cam_spin)
 
@@ -382,15 +382,36 @@ class MainWindow(QMainWindow):
             self._path_cap = cv2.VideoCapture(idx)
             self._current_path_idx = idx
 
-        ret, frame = self._path_cap.read()
-        if ret:
-            if self.mirrored:
-                frame = cv2.flip(frame, 1)
-            self._display_frame(frame)
+        ret, frame = False, None
+        if self._path_cap is not None and self._path_cap.isOpened():
+            ret, frame = self._path_cap.read()
+
+        if ret and self.mirrored:
+            frame = cv2.flip(frame, 1)
         else:
-            self._feed_label.setText(
-                f"Failed to capture Pathfinding Cam (Index: {idx})"
-            )
+            # --- FALLBACK: Create a blank canvas if camera is offline ---
+            h, w = self.shared_state.FRAME_H, self.shared_state.FRAME_W
+            frame = np.zeros((h, w, 3), dtype=np.uint8)
+
+            # Put an offline indicator in the center
+            text = f"Cam {idx} Offline"
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            text_size = cv2.getTextSize(text, font, 1, 2)[0]
+            text_x = (w - text_size[0]) // 2
+            text_y = (h + text_size[1]) // 2
+            cv2.putText(frame, text, (text_x, text_y), font, 1, (100, 100, 100), 2)
+
+        # --- ALWAYS Draw Gaze Dot ---
+        gaze_x, gaze_y = self.shared_state.get_gaze()
+        if gaze_x >= 0 and gaze_y >= 0:
+            # Recalculate h, w in case the camera returned a different resolution
+            h, w = frame.shape[:2]
+            cx = int(gaze_x * w)
+            cy = int(gaze_y * h)
+            cv2.circle(frame, (cx, cy), 12, (0, 255, 100), 2)
+            cv2.circle(frame, (cx, cy), 3, (0, 255, 100), -1)
+
+        self._display_frame(frame)
 
     def _display_frame(self, frame: np.ndarray):
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
