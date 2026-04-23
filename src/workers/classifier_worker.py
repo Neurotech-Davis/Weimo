@@ -18,12 +18,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from ml_model import models
 
 MOVE_CONFIDENCE_THRESHOLD = 0.95
-LABEL_MAP = {0: "idle", 1: "move", 2: "jaw_clench"}
+LABEL_MAP = {0: "other", 1: "move"}
 EXCLUDE = {"Trigger", "Event"}
 
 CONFIGS = {
     "N_CHANNELS": 8,
-    "N_CLASSES": 3,
+    "N_CLASSES": 2, # 2 for binary
     "TRIAL_DUR": 3,
     "SFREQ": 300,
     "STRIDE_SEC": 1,
@@ -31,7 +31,7 @@ CONFIGS = {
 }
 CONFIGS["N_TIMEPOINTS"] = int(CONFIGS["SFREQ"] * CONFIGS["TRIAL_DUR"]) + 1  # MNE tmax inclusive → 901
 
-MODEL_PATH = "./models/DeepConvNet_per_epoch.pt"
+MODEL_PATH = "./models/DeepConvNet_per_epoch_binary_move.pt"
 STREAM_NAME = "WS-default"
 
 
