@@ -15,6 +15,7 @@ import multiprocessing as mp
 
 def main():
     record_eeg = "--record-eeg" in sys.argv
+    mock_classifier = "--mock-classifier" in sys.argv
     shared_state = SharedState()  # all shared mem in one place
 
     # Daemon=true means they are killed when parent dies. This is desired UNLESS they have important cleanup in their "finally" block, like the motor worker which wants to shut off the car.
@@ -27,16 +28,20 @@ def main():
     # p_pathfinding = mp.Process(target=pathfinding_worker, args=(shared_state,), daemon=True)
 
     # process_arr = [p_tracker]
-    process_arr = [p_tracker, p_classifier]
+    # process_arr = [p_tracker, p_pathfinding, p_motor]
+    process_arr = [p_tracker]
     if record_eeg:
         process_arr.append(p_recorder)
-    # process_arr = [p_tracker, p_classifier, p_pathfinding, p_motor]
+
+    shared_state.mock_classifier.value = mock_classifier
+    if not mock_classifier:
+        process_arr.append(p_classifier)
 
     for proc in process_arr:
         proc.start()
 
     app = QApplication(sys.argv)
-    window = MainWindow(shared_state)
+    window = MainWindow(shared_state, mock_classifier=mock_classifier)
     window.show()
     app.exec()
 

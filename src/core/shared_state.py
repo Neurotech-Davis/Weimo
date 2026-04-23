@@ -34,6 +34,7 @@ class SharedState:
         self.classifier_running = mp.Value(ctypes.c_bool, False)
         self.prediction = mp.Value(ctypes.c_int, -1)
         self.pred_confidence = mp.Value(ctypes.c_float, -1.0)
+        self.mock_classifier = mp.Value(ctypes.c_bool, False)  # set by main_process
 
         # classifier params (UI -> classifier)
         # does it need to pass anything?
@@ -58,6 +59,10 @@ class SharedState:
         # Pathfinding -> UI
         self.pathfinding_running = mp.Value(ctypes.c_bool, False)
         self.pathfinding_error = mp.Event()
+
+        # Pathfinding -> Motor (lidar guard)
+        self.obstacle_detected = mp.Value(ctypes.c_bool, False)
+        self.lidar_dist = mp.Value(ctypes.c_float, float("inf"))
 
     def get_gaze(self) -> tuple:
         return self.gaze_x.value, self.gaze_y.value

@@ -33,25 +33,18 @@ from PyQt6.QtGui import QImage, QPixmap
 
 FEED_EYETRACKER = "eyetracker"
 FEED_PATHFINDING = "pathfinding"
-
-# Must match COMMANDS dict in motor_worker.py
-MOTOR_COMMANDS = {
-    "STOP": 0,
-    "▲ Forward": 1,
-    "▼ Backward": 2,
-    "◄ Rot Left": 3,
-    "► Rot Right": 4,
-    "« Strafe L": 5,
-    "» Strafe R": 6,
+MOCK_STATE_STYLES = {
+    0: ("IDLE", "#888888"),
+    1: ("MOVE", "#00cc66"),
+    2: ("JAW CLENCH", "#cc8800"),
 }
-
-MOTOR_STATE_NAMES = {v: k for k, v in MOTOR_COMMANDS.items()}
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, shared_state):
+    def __init__(self, shared_state, mock_classifier=False):
         super().__init__()
         self.shared_state = shared_state
+        self.mock_classifier = mock_classifier
         self.setWindowTitle("Weimo")
         self.resize(1100, 650)
         self.mirrored = True
@@ -87,16 +80,20 @@ class MainWindow(QMainWindow):
     def _build_right_panel(self) -> QVBoxLayout:
         layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        layout.setSpacing(10)
+        layout.setSpacing(6)  # tighter spacing
 
         layout.addWidget(self._build_status_group())
         layout.addWidget(self._build_camera_switcher_group())
         layout.addWidget(self._build_gaze_group())
         layout.addWidget(self._build_eyetracker_controls_group())
-        layout.addWidget(self._build_classifier_group())
         layout.addWidget(self._build_motor_group())
-        layout.addStretch()
 
+        if self.mock_classifier:
+            layout.addWidget(self._build_mock_classifier_group())
+        else:
+            layout.addWidget(self._build_classifier_group())
+
+        layout.addStretch()
         return layout
 
     # --- Worker status ---
@@ -128,10 +125,8 @@ class MainWindow(QMainWindow):
         self._radio_eyetracker = QRadioButton("Eyetracker")
         self._radio_pathfinding = QRadioButton("Pathfinding")
         self._radio_eyetracker.setChecked(True)
-
         self._feed_btn_group.addButton(self._radio_eyetracker, 0)
         self._feed_btn_group.addButton(self._radio_pathfinding, 1)
-
         self._radio_eyetracker.toggled.connect(
             lambda checked: self._on_feed_switched(FEED_EYETRACKER) if checked else None
         )
@@ -140,31 +135,26 @@ class MainWindow(QMainWindow):
                 self._on_feed_switched(FEED_PATHFINDING) if checked else None
             )
         )
-
-        self._mirror_check = QCheckBox("Mirror feed")
+        self._mirror_check = QCheckBox("Mirror")
         self._mirror_check.setChecked(True)
         self._mirror_check.toggled.connect(lambda v: setattr(self, "mirrored", v))
 
         layout.addWidget(self._radio_eyetracker)
         layout.addWidget(self._radio_pathfinding)
+        layout.addStretch()
         layout.addWidget(self._mirror_check)
-
         return box
 
     # --- Gaze readout ---
 
     def _build_gaze_group(self) -> QGroupBox:
-        box = QGroupBox("Gaze Position")
+        box = QGroupBox("Gaze")
         layout = QVBoxLayout(box)
+        layout.setSpacing(2)
 
-        self._gaze_x_label = QLabel("X:  --")
-        self._gaze_y_label = QLabel("Y:  --")
-        self._face_label = QLabel("Face: --")
-
-        for lbl in (self._gaze_x_label, self._gaze_y_label, self._face_label):
-            lbl.setStyleSheet("font-family: monospace; font-size: 13px;")
-            layout.addWidget(lbl)
-
+        self._gaze_label = QLabel("Pos:  --  |  Face: not detected")
+        self._gaze_label.setStyleSheet("font-family: monospace; font-size: 12px;")
+        layout.addWidget(self._gaze_label)
         return box
 
     # --- Eyetracker controls ---
@@ -173,30 +163,44 @@ class MainWindow(QMainWindow):
         box = QGroupBox("Eyetracker")
         layout = QVBoxLayout(box)
 
-        layout.addWidget(QLabel("Eyetracker Camera Index"))
+        # row 1: both camera spinners on same line
+        cam_row = QHBoxLayout()
+
+        cam_row.addWidget(QLabel("Eye:"))
         self._cam_spin = QSpinBox()
-        self._cam_spin.setRange(0, 100)
+        self._cam_spin.setRange(0, 10)
         self._cam_spin.setValue(self.shared_state.camera_index.value)
+        self._cam_spin.setFixedWidth(55)
         self._cam_spin.valueChanged.connect(self._on_eyetracker_cam_changed)
-        layout.addWidget(self._cam_spin)
+        cam_row.addWidget(self._cam_spin)
 
-        layout.addWidget(QLabel("Pathfinding Camera Index"))
+        cam_row.addSpacing(10)
+
+        cam_row.addWidget(QLabel("Path:"))
         self._path_cam_spin = QSpinBox()
-        self._path_cam_spin.setRange(0, 100)
+        self._path_cam_spin.setRange(0, 10)
         self._path_cam_spin.setValue(self.shared_state.pathfinding_camera_index.value)
+        self._path_cam_spin.setFixedWidth(55)
         self._path_cam_spin.valueChanged.connect(self._on_pathfinding_cam_changed)
-        layout.addWidget(self._path_cam_spin)
+        cam_row.addWidget(self._path_cam_spin)
 
-        layout.addWidget(QLabel("Smoothing"))
-        self._smooth_label = QLabel(f"{self.shared_state.smoothing_factor.value:.2f}")
+        cam_row.addStretch()
+        layout.addLayout(cam_row)
+
+        # row 2: smoothing slider
+        smooth_row = QHBoxLayout()
+        smooth_row.addWidget(QLabel("Smooth:"))
         self._smooth_slider = QSlider(Qt.Orientation.Horizontal)
         self._smooth_slider.setRange(0, 100)
         self._smooth_slider.setValue(
             int(self.shared_state.smoothing_factor.value * 100)
         )
         self._smooth_slider.valueChanged.connect(self._on_smoothing_changed)
-        layout.addWidget(self._smooth_slider)
-        layout.addWidget(self._smooth_label)
+        smooth_row.addWidget(self._smooth_slider)
+        self._smooth_label = QLabel(f"{self.shared_state.smoothing_factor.value:.2f}")
+        self._smooth_label.setFixedWidth(30)
+        smooth_row.addWidget(self._smooth_label)
+        layout.addLayout(smooth_row)
 
         return box
 
@@ -217,51 +221,87 @@ class MainWindow(QMainWindow):
 
         return box
 
+    # -- Mock classifier --
+    def _build_mock_classifier_group(self) -> QGroupBox:
+        box = QGroupBox("⚠ Mock Classifier")
+        box.setStyleSheet("QGroupBox { color: orange; font-weight: bold; }")
+        layout = QVBoxLayout(box)
+
+        # current state indicator
+        self._mock_state_label = QLabel("Current: IDLE")
+        self._mock_state_label.setStyleSheet(
+            "font-family: monospace; font-size: 12px; color: #888888;"
+        )
+        layout.addWidget(self._mock_state_label)
+
+        btn_move = QPushButton("Simulate MOVE")
+        btn_move.setStyleSheet("background: #00cc66; color: white; font-weight: bold;")
+        btn_move.clicked.connect(self._mock_move)
+        layout.addWidget(btn_move)
+
+        btn_jaw = QPushButton("Simulate JAW CLENCH")
+        btn_jaw.setStyleSheet("background: #cc8800; color: white; font-weight: bold;")
+        btn_jaw.clicked.connect(self._mock_jaw_clench)
+        layout.addWidget(btn_jaw)
+
+        btn_idle = QPushButton("Simulate IDLE")
+        btn_idle.setStyleSheet("background: #555555; color: white;")
+        btn_idle.clicked.connect(self._mock_idle)
+        layout.addWidget(btn_idle)
+
+        return box
+
+    def _mock_move(self):
+        self.shared_state.prediction.value = 1
+        self.shared_state.pred_confidence.value = 1.0
+        self._update_mock_state_label(1)
+
+    def _mock_jaw_clench(self):
+        self.shared_state.prediction.value = 2
+        self.shared_state.pred_confidence.value = 1.0
+        self._update_mock_state_label(2)
+
+    def _mock_idle(self):
+        self.shared_state.prediction.value = 0
+        self.shared_state.pred_confidence.value = 1.0
+        self._update_mock_state_label(0)
+
+    def _update_mock_state_label(self, pred: int):
+        name, color = MOCK_STATE_STYLES.get(pred, ("?", "#fff"))
+        self._mock_state_label.setText(f"Current: {name}")
+        self._mock_state_label.setStyleSheet(
+            f"font-family: monospace; font-size: 12px; "
+            f"font-weight: bold; color: {color};"
+        )
+
     # --- Motor controls ---
 
     def _build_motor_group(self) -> QGroupBox:
         box = QGroupBox("Motor")
         layout = QVBoxLayout(box)
 
+        # state readout
         self._motor_state_label = QLabel("State: --")
         self._motor_state_label.setStyleSheet(
             "font-family: monospace; font-size: 13px;"
         )
         layout.addWidget(self._motor_state_label)
 
-        # row 1: stop spans full width
-        self._btn_stop = QPushButton("STOP")
+        # target readout
+        self._target_label = QLabel("Target: --")
+        self._target_label.setStyleSheet(
+            "font-family: monospace; font-size: 12px; color: #888;"
+        )
+        layout.addWidget(self._target_label)
+
+        # emergency stop — only manual control that makes sense
+        self._btn_stop = QPushButton("⬛ EMERGENCY STOP")
         self._btn_stop.setStyleSheet(
-            "background: #cc3333; color: white; font-weight: bold;"
+            "background: #cc3333; color: white; font-weight: bold; "
+            "font-size: 14px; padding: 8px;"
         )
         self._btn_stop.clicked.connect(lambda: self._send_motor_command(0))
         layout.addWidget(self._btn_stop)
-
-        # row 2: forward
-        row_fwd = QHBoxLayout()
-        btn_fwd = QPushButton("▲")
-        btn_fwd.clicked.connect(lambda: self._send_motor_command(1))
-        row_fwd.addStretch()
-        row_fwd.addWidget(btn_fwd)
-        row_fwd.addStretch()
-        layout.addLayout(row_fwd)
-
-        # row 3: strafe left | rot left | rot right | strafe right
-        row_mid = QHBoxLayout()
-        for label, cmd_id in (("«", 5), ("◄", 3), ("►", 4), ("»", 6)):
-            btn = QPushButton(label)
-            btn.clicked.connect(lambda _, c=cmd_id: self._send_motor_command(c))
-            row_mid.addWidget(btn)
-        layout.addLayout(row_mid)
-
-        # row 4: backward
-        row_bwd = QHBoxLayout()
-        btn_bwd = QPushButton("▼")
-        btn_bwd.clicked.connect(lambda: self._send_motor_command(2))
-        row_bwd.addStretch()
-        row_bwd.addWidget(btn_bwd)
-        row_bwd.addStretch()
-        layout.addLayout(row_bwd)
 
         return box
 
@@ -273,8 +313,9 @@ class MainWindow(QMainWindow):
         self._update_feed()
         self._update_gaze_readout()
         self._update_worker_status()
-        self._update_classifier_readout()
         self._update_motor_readout()
+        if not self.mock_classifier:
+            self._update_classifier_readout()
 
     def _update_feed(self):
         if self._active_feed == FEED_EYETRACKER:
@@ -341,13 +382,11 @@ class MainWindow(QMainWindow):
     def _update_gaze_readout(self):
         gx, gy = self.shared_state.get_gaze()
         face = self.shared_state.face_detected.value
+        face_str = "✓" if face else "✗"
         if gx >= 0:
-            self._gaze_x_label.setText(f"X:  {gx:.3f}")
-            self._gaze_y_label.setText(f"Y:  {gy:.3f}")
+            self._gaze_label.setText(f"Pos:  ({gx:.3f}, {gy:.3f})  |  Face: {face_str}")
         else:
-            self._gaze_x_label.setText("X:  --")
-            self._gaze_y_label.setText("Y:  --")
-        self._face_label.setText(f"Face: {'detected' if face else 'not detected'}")
+            self._gaze_label.setText(f"Pos:  --  |  Face: {face_str}")
 
     def _update_worker_status(self):
         status_map = {
@@ -379,9 +418,20 @@ class MainWindow(QMainWindow):
 
     def _update_motor_readout(self):
         state_id = self.shared_state.motor_state.value
-        self._motor_state_label.setText(
-            f"State: {MOTOR_STATE_NAMES.get(state_id, '?')}"
+        state_name = {0: "IDLE", 1: "DRIVING"}.get(state_id, "?")
+        colors = {0: "#888888", 1: "#00cc66"}
+        self._motor_state_label.setText(f"State: {state_name}")
+        self._motor_state_label.setStyleSheet(
+            f"font-family: monospace; font-size: 13px; "
+            f"font-weight: bold; color: {colors.get(state_id, '#fff')};"
         )
+
+        angle = self.shared_state.target_angle.value
+        dist = self.shared_state.target_dist.value
+        if state_id == 1:
+            self._target_label.setText(f"Target: {angle:+.1f}°  {dist:.0f}mm")
+        else:
+            self._target_label.setText("Target: --")
 
     # ------------------------------------------------------------------
     # Callbacks
