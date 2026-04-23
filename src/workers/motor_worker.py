@@ -19,7 +19,7 @@ import time
 from enum import Enum
 
 
-PICO_PORT = "/dev/ttyACM0"  # Windows: COM3 etc.
+PICO_PORT = "COM8"  # Windows: COM3 etc.
 BAUD_RATE = 115200
 
 MOVE_CONFIDENCE_THRESHOLD = 0.95
