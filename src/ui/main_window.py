@@ -50,6 +50,9 @@ class MainWindow(QMainWindow):
         self.mirrored = True
         self._active_feed = FEED_EYETRACKER
 
+        self._path_cap = None
+        self._current_path_idx = self.shared_state.pathfinding_camera_index.value
+
         self._build_ui()
 
         self._timer = QTimer()
@@ -336,6 +339,9 @@ class MainWindow(QMainWindow):
 
     def _update_feed(self):
         if self._active_feed == FEED_EYETRACKER:
+            if self._path_cap is not None:
+                self._path_cap.release()
+                self._path_cap = None
             self._render_eyetracker_feed()
         else:
             self._render_pathfinding_feed()
@@ -365,25 +371,26 @@ class MainWindow(QMainWindow):
 
         self._display_frame(frame)
 
-    def _render_pathfinding_feed(self):
-        if not hasattr(self.shared_state, "pathfinding_frame_ready"):
-            self._feed_label.setText("Pathfinding feed not available")
-            return
-        if not self.shared_state.pathfinding_frame_ready.is_set():
-            return
+    def _render_pathfinding_local_feed(self):
+        """Directly opens and reads from the USB camera in the UI thread."""
+        idx = self.shared_state.pathfinding_camera_index.value
 
-        with self.shared_state.pathfinding_frame_buffer.get_lock():
-            buf = np.frombuffer(
-                self.shared_state.pathfinding_frame_buffer.get_obj(), dtype=np.uint8
+        # Initialize or Re-initialize if index changed
+        if self._path_cap is None or idx != self._current_path_idx:
+            if self._path_cap is not None:
+                self._path_cap.release()
+            self._path_cap = cv2.VideoCapture(idx)
+            self._current_path_idx = idx
+
+        ret, frame = self._path_cap.read()
+        if ret:
+            if self.mirrored:
+                frame = cv2.flip(frame, 1)
+            self._display_frame(frame)
+        else:
+            self._feed_label.setText(
+                f"Failed to capture Pathfinding Cam (Index: {idx})"
             )
-            frame = buf.reshape(
-                (self.shared_state.FRAME_H, self.shared_state.FRAME_W, 3)
-            ).copy()
-
-        if self.mirrored:
-            frame = cv2.flip(frame, 1)
-
-        self._display_frame(frame)
 
     def _display_frame(self, frame: np.ndarray):
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -486,5 +493,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._timer.stop()
+        if self._path_cap is not None:
+            self._path_cap.release()
         self.shared_state.shutdown.set()
         event.accept()
