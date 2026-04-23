@@ -1,0 +1,24 @@
+{
+  "target": "jaw_clench",
+  "label_map": {
+    "idle": 0,
+    "move": 0,
+    "jaw_clench": 1
+  },
+  "classifier": "SVM_linear",
+  "bandpass": [
+    [
+      8,
+      13
+    ]
+  ],
+  "extractor": "bandpower",
+  "val_session": "chengyi_4_8_0.fif",
+  "accuracy": 0.9658536585365853,
+  "f1_macro": 0.944034944034944,
+  "kappa": 0.8881789137380192,
+  "N_CHANNELS": 8,
+  "N_TIMEPOINTS": 901,
+  "SFREQ": 300,
+  "TRIAL_DUR": 3.0
+}
