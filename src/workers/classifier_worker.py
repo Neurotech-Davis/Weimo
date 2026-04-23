@@ -273,7 +273,7 @@ if __name__ == "__main__":
             "..",
             "data_collection",
             "annotated_fifs",
-            "chengyi_4_8_1.fif",
+            "chengyi_4_21_1.fif",
         )
     )
     print(f"Loading: {FIF_PATH}")
