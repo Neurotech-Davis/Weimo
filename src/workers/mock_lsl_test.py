@@ -10,7 +10,7 @@ from mne_lsl.player import PlayerLSL
 # Define paths relative to src/workers
 # DATA_DIR = "../../data_collection/raw_fif"
 DATA_DIR = "../../data_collection/annotated_fifs"
-FILE_NAME = "chengyi_4_8_1.fif"
+FILE_NAME = "chengyi_4_21_1.fif"
 FILE_PATH = os.path.join(DATA_DIR, FILE_NAME)
 
 
