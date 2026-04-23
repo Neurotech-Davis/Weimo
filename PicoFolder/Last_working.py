@@ -9,6 +9,7 @@ WHEEL_DIAMETER_M = 0.066
 WHEEL_CIRCUMFERENCE = math.pi * WHEEL_DIAMETER_M
 TICKS_PER_REV = 990
 METERS_PER_TICK = WHEEL_CIRCUMFERENCE / TICKS_PER_REV
+DISTANCE_MULTIPLIER = 1.0
 TRACK_WIDTH_M = 0.125
 
 # --- I2C & MOTOR HAT SETUP ---
@@ -38,6 +39,7 @@ def set_pin(channel, state):
         set_pwm(channel, 0, 4096)
 
 def set_motor(motor_num, speed):
+    # Mapping based on your "Perfect Mapping"
     pins = {1: (8, 10, 9), 2: (13, 11, 12), 3: (2, 4, 3), 4: (7, 5, 6)}
     pwm_pin, in1_pin, in2_pin = pins[motor_num]
     speed = max(-4095, min(4095, int(speed)))
@@ -97,57 +99,27 @@ def stop_all_motors():
         set_motor(i, 0)
 
 # --- ROBUST TICK AVERAGE ---
+# Drops the highest and lowest absolute tick count, averages the middle two.
+# This gives early noise-tolerance even during the calibration phase.
 def robust_avg_ticks():
     vals = sorted([abs(ticks[i]) for i in range(1, 5)])
     return (vals[1] + vals[2]) / 2.0
 
-# --- DEMO-DAY DYNAMIC SCALING ---
-def get_drive_multiplier(target_meters):
-    val = abs(target_meters)
-    if val <= 0.10:
-        return 0.71
-    elif val <= 0.15:
-        return 0.58
-    elif val <= 0.20:
-        return 0.56
-    elif val <= 0.30:
-        return 0.53
-    elif val <= 0.40:
-        return 0.50
-    elif val <= 0.50:
-        return 0.47
-    elif val <= 0.60:
-        return 0.47
-    elif val <= 0.70:
-        return 0.46
-    elif val <= 0.80:
-        return 0.45
-    else:
-        return 0.39
-    
-
-def get_turn_multiplier(degrees):
-    # Turns behave differently mechanically. 
-    # Testing proved a 1.0 multiplier yields between 45 and 55 degrees.
-    return 0.90
-
 # --- MOTION ENGINE ---
 def drive_distance(target_meters):
-    current_multiplier = get_drive_multiplier(target_meters)
-    target_ticks = (target_meters / METERS_PER_TICK) * current_multiplier
-    
+    target_ticks = (target_meters / METERS_PER_TICK) * DISTANCE_MULTIPLIER
     for i in range(1, 5):
         ticks[i] = 0
 
     Kp = 5.0
-    max_speed = 1100  # Lowered for stable SNR
+    max_speed = 1500
     min_speed = 800
     accel_rate = 50
     current_speed = 0
-    loop_count = 0                          
+    loop_count = 0                          # FIX: initialize loop counter
 
     direction = 1 if target_meters >= 0 else -1
-    print(f"Driving {target_meters}m (target={target_ticks:.0f} ticks, multiplier={current_multiplier})...")
+    print(f"Driving {target_meters}m (target={target_ticks:.0f} ticks)...")
 
     while True:
         if poll_obj.poll(0):
@@ -155,7 +127,7 @@ def drive_distance(target_meters):
                 break
 
         avg_ticks = robust_avg_ticks()
-        error = target_ticks - avg_ticks    
+        error = target_ticks - avg_ticks    # Always positive until we arrive
 
         loop_count += 1
         if loop_count % 5 == 0:
@@ -168,16 +140,16 @@ def drive_distance(target_meters):
         if abs(error) < 25:
             break
 
+        # Ramp up toward max_speed, ramp down as error shrinks
         desired_speed = min(max_speed, error * Kp)
-        current_speed = min(desired_speed, current_speed + accel_rate)  
+        current_speed = min(desired_speed, current_speed + accel_rate)  # FIX: ramp down too
         output_pwm = max(min_speed, current_speed)
-        final_pwm = output_pwm * direction  
+        final_pwm = output_pwm * direction  # FIX: respect drive direction
 
         for i in range(1, 5):
             power = final_pwm
-            # Gentle 5% bias to the right side (M1 & M2)
-            if i == 1 or i == 2:
-                power = int(final_pwm * 0.95)   
+            if i == 1 or i == 3:
+                power = int(final_pwm * 0.90)   # Steering bias
             set_motor(i, power)
 
         time.sleep(0.02)
@@ -187,20 +159,18 @@ def drive_distance(target_meters):
 
 def turn_robot(degrees):
     arc_length = (math.pi * TRACK_WIDTH_M * abs(degrees)) / 360
-    current_multiplier = get_turn_multiplier(degrees)
-    target_ticks = (arc_length / METERS_PER_TICK) * current_multiplier
-    
+    target_ticks = (arc_length / METERS_PER_TICK) * DISTANCE_MULTIPLIER
     for i in range(1, 5):
         ticks[i] = 0
 
     Kp = 5.0
-    max_speed = 1100  # Lowered for stable SNR
+    max_speed = 1500
     min_speed = 800
     accel_rate = 50
     current_speed = 0
-    loop_count = 0                          
+    loop_count = 0                          # FIX: initialize loop counter
 
-    print(f"Turning {degrees} degrees (target={target_ticks:.0f} ticks, multiplier={current_multiplier})...")
+    print(f"Turning {degrees} degrees (target={target_ticks:.0f} ticks)...")
 
     while True:
         if poll_obj.poll(0):
@@ -221,10 +191,13 @@ def turn_robot(degrees):
         if abs(error) < 25:
             break
 
+        # Ramp up toward max_speed, ramp down as error shrinks
         desired_speed = min(max_speed, error * Kp)
-        current_speed = min(desired_speed, current_speed + accel_rate)  
+        current_speed = min(desired_speed, current_speed + accel_rate)  # FIX: ramp down too
         output_pwm = max(min_speed, current_speed)
 
+        # Pivot turn: right side runs opposite direction to left side
+        # Positive degrees = CW (right turn): right side reverses, left side forwards
         if degrees > 0:
             set_motor(1, -output_pwm)
             set_motor(2, -output_pwm)
