@@ -48,26 +48,24 @@ ZONE_DWELL_SEC = 0.5  # how long gaze must dwell before activating
 # zone definitions: (y_min, y_max, turn_degrees)
 TURN_ZONES_LEFT = [
     (0.0, 0.25, -45),  # top left    → 45° CCW
-    (0.75, 1.0, -90),  # bottom left → 135° CCW
+    (0.75, 1.0, -90),  # bottom left → 90° CCW
 ]
 TURN_ZONES_RIGHT = [
     (0.0, 0.25, 45),  # top right    → 45° CW
-    (0.75, 1.0, 135),  # bottom right → 135° CW
+    (0.75, 1.0, 90),  # bottom right → 90° CW
 ]
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, shared_state, mock_classifier=False):
+    def __init__(self, shared_state, mock_classifier=False, mixed_classifier=False):
         super().__init__()
         self.shared_state = shared_state
         self.mock_classifier = mock_classifier
+        self.mixed_classifier = mixed_classifier
         self.setWindowTitle("Weimo")
         self.resize(1100, 650)
         self.mirrored = True
         self._active_feed = FEED_EYETRACKER
-
-        self._path_cap = None
-        self._current_path_idx = self.shared_state.pathfinding_camera_index.value
 
         self._path_cap = None
         self._current_path_idx = None
@@ -81,6 +79,26 @@ class MainWindow(QMainWindow):
         self._timer.start(33)
 
     # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _make_group(self, title: str) -> tuple:
+        """Create a QGroupBox with a vertical layout and consistent tight margins."""
+        box = QGroupBox(title)
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(3)
+        return box, layout
+
+    def _make_hgroup(self, title: str) -> tuple:
+        """Create a QGroupBox with a horizontal layout and tight margins."""
+        box = QGroupBox(title)
+        layout = QHBoxLayout(box)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(6)
+        return box, layout
+
+    # ------------------------------------------------------------------
     # UI construction
     # ------------------------------------------------------------------
 
@@ -88,7 +106,7 @@ class MainWindow(QMainWindow):
         root = QWidget()
         self.setCentralWidget(root)
         layout = QHBoxLayout(root)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(10)
 
         layout.addWidget(self._build_feed_panel(), stretch=3)
@@ -104,7 +122,7 @@ class MainWindow(QMainWindow):
     def _build_right_panel(self) -> QVBoxLayout:
         layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        layout.setSpacing(6)  # tighter spacing
+        layout.setSpacing(4)
 
         layout.addWidget(self._build_status_group())
         layout.addWidget(self._build_camera_switcher_group())
@@ -115,6 +133,9 @@ class MainWindow(QMainWindow):
 
         if self.mock_classifier:
             layout.addWidget(self._build_mock_classifier_group())
+        elif self.mixed_classifier:
+            layout.addWidget(self._build_classifier_group())  # live readout
+            layout.addWidget(self._build_mock_classifier_group())  # + override buttons
         else:
             layout.addWidget(self._build_classifier_group())
 
@@ -124,27 +145,21 @@ class MainWindow(QMainWindow):
     # --- Worker status ---
 
     def _build_status_group(self) -> QGroupBox:
-        box = QGroupBox("Worker Status")
-        layout = QVBoxLayout(box)
+        box, layout = self._make_hgroup("Worker Status")
 
         self._status_labels = {}
         for name in ("eyetracker", "pathfinding", "classifier", "motor"):
-            row = QHBoxLayout()
-            row.addWidget(QLabel(name))
-            indicator = QLabel("●")
-            indicator.setStyleSheet("color: #555;")
-            self._status_labels[name] = indicator
-            row.addStretch()
-            row.addWidget(indicator)
-            layout.addLayout(row)
+            label = QLabel(f"● {name[:3]}")
+            label.setStyleSheet("color: #555; font-family: monospace; font-size: 11px;")
+            self._status_labels[name] = label
+            layout.addWidget(label)
 
         return box
 
     # --- Camera switcher ---
 
     def _build_camera_switcher_group(self) -> QGroupBox:
-        box = QGroupBox("Camera Feed")
-        layout = QVBoxLayout(box)
+        box, layout = self._make_group("Camera Feed")
 
         self._feed_btn_group = QButtonGroup(box)
         self._radio_eyetracker = QRadioButton("Eyetracker")
@@ -160,22 +175,25 @@ class MainWindow(QMainWindow):
                 self._on_feed_switched(FEED_PATHFINDING) if checked else None
             )
         )
+
         self._mirror_check = QCheckBox("Mirror")
         self._mirror_check.setChecked(True)
         self._mirror_check.toggled.connect(lambda v: setattr(self, "mirrored", v))
 
-        layout.addWidget(self._radio_eyetracker)
-        layout.addWidget(self._radio_pathfinding)
-        layout.addStretch()
-        layout.addWidget(self._mirror_check)
+        # put all three on one row
+        row = QHBoxLayout()
+        row.addWidget(self._radio_eyetracker)
+        row.addWidget(self._radio_pathfinding)
+        row.addStretch()
+        row.addWidget(self._mirror_check)
+        layout.addLayout(row)
+
         return box
 
     # --- Gaze readout ---
 
     def _build_gaze_group(self) -> QGroupBox:
-        box = QGroupBox("Gaze")
-        layout = QVBoxLayout(box)
-        layout.setSpacing(2)
+        box, layout = self._make_group("Gaze")
 
         self._gaze_label = QLabel("Pos:  --  |  Face: not detected")
         self._gaze_label.setStyleSheet("font-family: monospace; font-size: 12px;")
@@ -185,12 +203,10 @@ class MainWindow(QMainWindow):
     # --- Eyetracker controls ---
 
     def _build_eyetracker_controls_group(self) -> QGroupBox:
-        box = QGroupBox("Eyetracker")
-        layout = QVBoxLayout(box)
+        box, layout = self._make_group("Eyetracker")
 
         # row 1: both camera spinners on same line
         cam_row = QHBoxLayout()
-
         cam_row.addWidget(QLabel("Eye:"))
         self._cam_spin = QSpinBox()
         self._cam_spin.setRange(0, 100)
@@ -199,7 +215,7 @@ class MainWindow(QMainWindow):
         self._cam_spin.valueChanged.connect(self._on_eyetracker_cam_changed)
         cam_row.addWidget(self._cam_spin)
 
-        cam_row.addSpacing(20)  # Increased from 10
+        cam_row.addSpacing(20)
 
         cam_row.addWidget(QLabel("Path:"))
         self._path_cam_spin = QSpinBox()
@@ -208,7 +224,6 @@ class MainWindow(QMainWindow):
         self._path_cam_spin.setFixedWidth(75)
         self._path_cam_spin.valueChanged.connect(self._on_pathfinding_cam_changed)
         cam_row.addWidget(self._path_cam_spin)
-
         cam_row.addStretch()
         layout.addLayout(cam_row)
 
@@ -229,10 +244,10 @@ class MainWindow(QMainWindow):
 
         return box
 
-    # -- Classifier output --
+    # --- Classifier output ---
+
     def _build_classifier_group(self) -> QGroupBox:
-        box = QGroupBox("Classifier")
-        layout = QVBoxLayout(box)
+        box, layout = self._make_group("Classifier")
 
         self._pred_label = QLabel("Prediction: --")
         self._pred_label.setStyleSheet(
@@ -246,13 +261,13 @@ class MainWindow(QMainWindow):
 
         return box
 
-    # -- Mock classifier --
-    def _build_mock_classifier_group(self) -> QGroupBox:
-        box = QGroupBox("⚠ Mock Classifier")
-        box.setStyleSheet("QGroupBox { color: orange; font-weight: bold; }")
-        layout = QVBoxLayout(box)
+    # --- Mock / override classifier ---
 
-        # current state indicator
+    def _build_mock_classifier_group(self) -> QGroupBox:
+        title = "⚠ Overrides" if self.mixed_classifier else "⚠ Mock Classifier"
+        box, layout = self._make_group(title)
+        box.setStyleSheet("QGroupBox { color: orange; font-weight: bold; }")
+
         self._mock_state_label = QLabel("Current: IDLE")
         self._mock_state_label.setStyleSheet(
             "font-family: monospace; font-size: 12px; color: #888888;"
@@ -295,46 +310,40 @@ class MainWindow(QMainWindow):
         name, color = MOCK_STATE_STYLES.get(pred, ("?", "#fff"))
         self._mock_state_label.setText(f"Current: {name}")
         self._mock_state_label.setStyleSheet(
-            f"font-family: monospace; font-size: 12px; "
-            f"font-weight: bold; color: {color};"
+            f"font-family: monospace; font-size: 12px; font-weight: bold; color: {color};"
         )
 
     # --- Motor controls ---
 
     def _build_motor_group(self) -> QGroupBox:
-        box = QGroupBox("Motor")
-        layout = QVBoxLayout(box)
+        box, layout = self._make_group("Motor")
 
-        # state readout
         self._motor_state_label = QLabel("State: --")
         self._motor_state_label.setStyleSheet(
             "font-family: monospace; font-size: 13px;"
         )
         layout.addWidget(self._motor_state_label)
 
-        # target readout
         self._target_label = QLabel("Target: --")
         self._target_label.setStyleSheet(
             "font-family: monospace; font-size: 12px; color: #888;"
         )
         layout.addWidget(self._target_label)
 
-        # emergency stop — only manual control that makes sense
         self._btn_stop = QPushButton("⬛ EMERGENCY STOP")
         self._btn_stop.setStyleSheet(
             "background: #cc3333; color: white; font-weight: bold; "
             "font-size: 14px; padding: 8px;"
         )
-        self._btn_stop.clicked.connect(lambda: self._send_motor_command(0))
+        self._btn_stop.clicked.connect(lambda: self._send_motor_command(1))
         layout.addWidget(self._btn_stop)
 
         return box
 
-    # -- Pathfinding group
+    # --- Pathfinding group ---
 
     def _build_pathfinding_group(self) -> QGroupBox:
-        box = QGroupBox("Pathfinding")
-        layout = QVBoxLayout(box)
+        box, layout = self._make_group("Pathfinding")
 
         self._angle_dist_label = QLabel("→ --°  |  --mm")
         self._obstacle_label = QLabel("Obstacle: --")
@@ -377,52 +386,40 @@ class MainWindow(QMainWindow):
         h, w = frame.shape[:2]
         zone_w_px = int(ZONE_WIDTH * w)
 
-        # compute dwell progress 0.0 → 1.0
         dwell_progress = 0.0
         if self._zone_dwell_start is not None and self._zone_active_deg is not None:
             dwell_progress = min(
                 1.0, (time.time() - self._zone_dwell_start) / ZONE_DWELL_SEC
             )
 
-        all_zones = [
-            # (x_start, x_end, y_min_norm, y_max_norm, degrees)
-            (0, zone_w_px, *z[:2], z[2])
-            for z in TURN_ZONES_LEFT
-        ] + [(w - zone_w_px, w, *z[:2], z[2]) for z in TURN_ZONES_RIGHT]
+        all_zones = [(0, zone_w_px, *z[:2], z[2]) for z in TURN_ZONES_LEFT] + [
+            (w - zone_w_px, w, *z[:2], z[2]) for z in TURN_ZONES_RIGHT
+        ]
 
         for x1, x2, y_min, y_max, deg in all_zones:
             y1 = int(y_min * h)
             y2 = int(y_max * h)
             is_active = self._zone_active_deg == deg
 
-            # base zone rectangle
             base_color = (0, 180, 255) if is_active else (80, 80, 80)
             cv2.rectangle(frame, (x1, y1), (x2, y2), base_color, 2)
 
-            # dwell progress bar — fills from bottom of zone upward
             if is_active and dwell_progress > 0:
                 bar_h = int((y2 - y1) * dwell_progress)
                 bar_color = (0, 255, 150) if dwell_progress < 1.0 else (0, 255, 0)
                 cv2.rectangle(frame, (x1 + 2, y2 - bar_h), (x2 - 2, y2), bar_color, -1)
-                # redraw border on top of fill
                 cv2.rectangle(frame, (x1, y1), (x2, y2), base_color, 2)
 
-            # label
-            label = f"{abs(deg)}°"
             direction = "L" if deg < 0 else "R"
-            text = f"{direction}{label}"
-            font_scale = 0.45
-            thickness = 1
-            text_x = x1 + 4
-            text_y = y1 + 18
+            text = f"{direction}{abs(deg)}°"
             cv2.putText(
                 frame,
                 text,
-                (text_x, text_y),
+                (x1 + 4, y1 + 18),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                font_scale,
+                0.45,
                 (255, 255, 255),
-                thickness,
+                1,
             )
 
         return frame
@@ -443,11 +440,8 @@ class MainWindow(QMainWindow):
             frame = cv2.flip(frame, 1)
 
         gaze_x, gaze_y = self.shared_state.get_gaze()
-
-        # draw zones first (behind gaze dot)
         frame = self._draw_turn_zones(frame, gaze_x, gaze_y)
 
-        # gaze dot on top
         if gaze_x >= 0 and gaze_y >= 0:
             h, w = frame.shape[:2]
             cx = int(gaze_x * w)
@@ -485,11 +479,8 @@ class MainWindow(QMainWindow):
             frame = cv2.flip(frame, 1)
 
         gaze_x, gaze_y = self.shared_state.get_gaze()
-
-        # zones are PRIMARY display here — draw first
         frame = self._draw_turn_zones(frame, gaze_x, gaze_y)
 
-        # gaze dot on top
         if gaze_x >= 0 and gaze_y >= 0:
             h, w = frame.shape[:2]
             cx = int(gaze_x * w)
@@ -528,7 +519,10 @@ class MainWindow(QMainWindow):
         }
         for name, label in self._status_labels.items():
             running = status_map.get(name, False)
-            label.setStyleSheet("color: #00cc66;" if running else "color: #555;")
+            color = "#00cc66" if running else "#555"
+            label.setStyleSheet(
+                f"color: {color}; font-family: monospace; font-size: 11px;"
+            )
 
     def _update_classifier_readout(self):
         pred = self.shared_state.prediction.value
@@ -541,7 +535,8 @@ class MainWindow(QMainWindow):
         colors = {0: "#888888", 1: "#00cc66", 2: "#cc8800"}
         self._pred_label.setText(f"Prediction: {label.upper()}")
         self._pred_label.setStyleSheet(
-            f"font-family: monospace; font-size: 13px; font-weight: bold; color: {colors.get(pred, '#fff')};"
+            f"font-family: monospace; font-size: 13px; font-weight: bold; "
+            f"color: {colors.get(pred, '#fff')};"
         )
         conf = self.shared_state.pred_confidence.value
         if conf >= 0:
@@ -556,7 +551,6 @@ class MainWindow(QMainWindow):
             f"font-family: monospace; font-size: 13px; "
             f"font-weight: bold; color: {colors.get(state_id, '#fff')};"
         )
-
         angle = self.shared_state.target_angle.value
         dist = self.shared_state.target_dist.value
         if state_id == 1:
@@ -568,7 +562,6 @@ class MainWindow(QMainWindow):
         angle = self.shared_state.target_angle.value
         dist = self.shared_state.target_dist.value
         obs = self.shared_state.obstacle_detected.value
-
         self._angle_dist_label.setText(f"→ {angle:+.1f}°  |  {dist:.0f}mm")
         self._obstacle_label.setText(f"Obstacle: {'⚠ YES' if obs else 'clear'}")
 
@@ -581,14 +574,11 @@ class MainWindow(QMainWindow):
 
         matched_deg = None
 
-        # check left zones
         if gaze_x <= ZONE_WIDTH:
             for y_min, y_max, deg in TURN_ZONES_LEFT:
                 if y_min <= gaze_y <= y_max:
                     matched_deg = deg
                     break
-
-        # check right zones
         elif gaze_x >= (1.0 - ZONE_WIDTH):
             for y_min, y_max, deg in TURN_ZONES_RIGHT:
                 if y_min <= gaze_y <= y_max:
@@ -597,14 +587,11 @@ class MainWindow(QMainWindow):
 
         if matched_deg is not None:
             if self._zone_active_deg != matched_deg:
-                # entered a new zone — reset dwell timer
                 self._zone_dwell_start = time.time()
                 self._zone_active_deg = matched_deg
             else:
-                # same zone — check dwell time
                 dwell = time.time() - self._zone_dwell_start
                 if dwell >= ZONE_DWELL_SEC:
-                    # only trigger on MOVE prediction
                     if (
                         self.shared_state.prediction.value == 1
                         and self.shared_state.pred_confidence.value >= 0.95

@@ -166,7 +166,9 @@ def drive_distance(target_meters):
     while True:
         if poll_obj.poll(0):
             if sys.stdin.readline().strip() == "STOP":
-                break
+                stop_all_motors()
+                print("OK:STOPPED")
+                return
 
         avg_ticks = robust_avg_ticks()
         error = target_ticks - avg_ticks
@@ -275,4 +277,3 @@ try:
         time.sleep(0.1)
 except KeyboardInterrupt:
     stop_all_motors()
-

@@ -12,9 +12,12 @@ import torch
 import mne
 
 mne.set_log_level("ERROR")
-
 from mne_lsl.lsl import local_clock
 from mne_lsl.stream import StreamLSL
+
+import warnings
+
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="mne")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from ml_model import models
@@ -196,7 +199,7 @@ def classifier_worker(shared_state):
             last_data = data.copy()
 
             # signal quality — remove this block once hardware is validated
-            print("[classifier_worker] Signal quality:")
+            # print("[classifier_worker] Signal quality:")
             signal_ok = check_signal_quality(data, eeg_picks)
             if not signal_ok:
                 print(

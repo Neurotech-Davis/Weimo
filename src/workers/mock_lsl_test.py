@@ -23,14 +23,14 @@ def start_mock():
 
     # name="WS-default" matches the STREAM_NAME in your classifier_worker
     # chunk_size=10 ensures a steady flow of samples (30Hz updates at 300Hz sfreq)
-    # player = PlayerLSL(FILE_PATH, chunk_size=10, name="WS-default")
+    player = PlayerLSL(FILE_PATH, chunk_size=10, name="WS-default")
 
-    raw = mne.io.read_raw_fif(FILE_PATH, preload=True)
+    # raw = mne.io.read_raw_fif(FILE_PATH, preload=True)
     # print(raw.annotations)  # find a move annotation timestamp
     # raw.crop(tmin=X)        # start just before a move annotation
-    midpoint = raw.times[-1] / 2
-    raw.crop(tmin=midpoint)
-    player = PlayerLSL(raw, chunk_size=10, name="WS-default")
+    # midpoint = raw.times[-1] / 2
+    # raw.crop(tmin=midpoint)
+    # player = PlayerLSL(raw, chunk_size=10, name="WS-default")
     player.start()
 
     player.start()

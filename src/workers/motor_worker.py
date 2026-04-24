@@ -20,6 +20,8 @@ import math
 from enum import Enum
 
 
+# Windows: COM8
+# Linux: /dev/ttyACM0
 PICO_PORT = "COM8"  # Windows: COM3 etc.
 BAUD_RATE = 115200
 
@@ -48,20 +50,27 @@ def connect(port: str, baud: int, retries: int = 5) -> serial.Serial:
     raise RuntimeError(f"[motor_worker] could not open {port} after {retries} attempts")
 
 
-def send(ser: serial.Serial, cmd: str) -> str:
-    """Send command, block until Pico acks."""
+def send(ser, cmd, shared_state=None):
     ser.write((cmd + "\n").encode())
     deadline = time.time() + 30.0
     while time.time() < deadline:
-        try:
-            line = ser.readline().decode().strip()
-            print(f"[motor_worker] pico: {line}")
-            if line in ("OK:DONE", "OK:STOPPED"):
-                return line
-        except Exception as e:
-            print(f"[motor_worker] read error: {e}")
-            return ""
-    print("[motor_worker] ⚠ timeout waiting for ack")
+        # check for interrupt before blocking on readline
+        if shared_state is not None:
+            if shared_state.motor_command.value != 0 or jaw_clench_detected(
+                shared_state
+            ):
+                ser.write(b"STOP\n")
+                ser.flush()
+                # drain until we get OK:STOPPED
+                drain_deadline = time.time() + 2.0
+                while time.time() < drain_deadline:
+                    line = ser.readline().decode().strip()
+                    if line in ("OK:DONE", "OK:STOPPED"):
+                        return "OK:STOPPED"
+                return "OK:STOPPED"
+        line = ser.readline().decode().strip()
+        if line in ("OK:DONE", "OK:STOPPED"):
+            return line
     return ""
 
 
@@ -69,12 +78,18 @@ def cmd_stop(ser):
     return send(ser, "STOP")
 
 
-def cmd_turn(ser, angle_deg: float) -> str:
-    return send(ser, f"TURN:{angle_deg:.1f}")
+def cmd_turn(ser, angle_deg: float, shared_state=None) -> str:
+    return send(ser, f"TURN:{angle_deg:.1f}", shared_state)
 
 
-def cmd_drive(ser, dist_m: float) -> str:
-    return send(ser, f"DRIVE:{dist_m:.3f}")
+def cmd_drive(ser, dist_m: float, shared_state=None) -> str:
+    return send(ser, f"DRIVE:{dist_m:.3f}", shared_state)
+
+
+def cmd_stop_immediate(ser):
+    """Fire-and-forget stop — doesn't wait for ack."""
+    ser.write(b"STOP\n")
+    ser.flush()
 
 
 # ── Jaw clench check — call between blocking operations ───────────────────────
@@ -102,17 +117,17 @@ def navigate_to(ser, h_angle: float, dist_mm: float, shared_state) -> bool:
             cmd_stop(ser)
             return False
         print(f"[motor_worker] rotating {h_angle:.1f}°")
-        cmd_turn(ser, h_angle)  # blocks until Pico acks OK:DONE
+        cmd_turn(ser, h_angle, shared_state)  # blocks until Pico acks OK:DONE
 
     # step 3 — drive forward
     if not math.isfinite(dist_mm):
         print(f"[motor_worker] dist={dist_mm:.0f}mm is not finite — skipping drive")
-        dist_mm = 1500.0
+        dist_mm = 700.0  # 1500 / 1000 / ?
 
     if dist_mm > DIST_THRESHOLD_MM:
         print(f"[motor_worker] driving {dist_mm:.0f}mm")
         dist_m = dist_mm / 1000.0
-        cmd_drive(ser, dist_m)
+        cmd_drive(ser, dist_m, shared_state)
 
     print("[motor_worker] arrived at target")
     return True
