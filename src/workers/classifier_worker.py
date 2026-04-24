@@ -23,13 +23,15 @@ EXCLUDE = {"Trigger", "Event"}
 
 CONFIGS = {
     "N_CHANNELS": 8,
-    "N_CLASSES": 2, # 2 for binary
+    "N_CLASSES": 2,  # 2 for binary
     "TRIAL_DUR": 3,
     "SFREQ": 300,
     "STRIDE_SEC": 1,
     "LEAD_IN": 2,
 }
-CONFIGS["N_TIMEPOINTS"] = int(CONFIGS["SFREQ"] * CONFIGS["TRIAL_DUR"]) + 1  # MNE tmax inclusive → 901
+CONFIGS["N_TIMEPOINTS"] = (
+    int(CONFIGS["SFREQ"] * CONFIGS["TRIAL_DUR"]) + 1
+)  # MNE tmax inclusive → 901
 
 MODEL_PATH = "./models/DeepConvNet_per_epoch_binary_move.pt"
 STREAM_NAME = "WS-default"
@@ -92,10 +94,11 @@ def check_signal_quality(data: np.ndarray, eeg_picks: list) -> bool:
         flat = ch_std < 1e-6 and ch not in REFERENCE_CHANNELS
         if flat:
             any_flat = True
-        flag = "⚠ FLAT" if flat else ""
-        print(
-            f"  {ch:<20} std={ch_std:.6f}  max={ch_max:.6f}  min={ch_min:.6f}  {flag}"
-        )
+            print("[classifier_worker] Warning: flat channels")
+        # flag = "⚠ FLAT" if flat else ""
+        # print(
+        #     f"  {ch:<20} std={ch_std:.6f}  max={ch_max:.6f}  min={ch_min:.6f}  {flag}"
+        # )
     return not any_flat
 
 
@@ -203,12 +206,12 @@ def classifier_worker(shared_state):
             # preprocess
             x = preprocess_epoch(data)
             # DEBUG — remove once hardware validated
-            print(
-                f"  [preprocess] raw    range: [{data.min():.6f}, {data.max():.6f}]  std: {data.std():.6f}"
-            )
-            print(
-                f"  [preprocess] scaled range: [{x.min():.3f}, {x.max():.3f}]  std: {x.std():.3f}"
-            )
+            # print(
+            #     f"  [preprocess] raw    range: [{data.min():.6f}, {data.max():.6f}]  std: {data.std():.6f}"
+            # )
+            # print(
+            #     f"  [preprocess] scaled range: [{x.min():.3f}, {x.max():.3f}]  std: {x.std():.3f}"
+            # )
             if torch.isnan(x).any():
                 print("[classifier_worker] ⚠ NaNs in tensor — skipping")
                 continue
