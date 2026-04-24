@@ -9,8 +9,8 @@ from pathfinding.camera_nav import screen_to_location
 
 
 # Pretty sure we measured ~11cm and -10 deg.
-MOUNT_HEIGHT = 20  # mm (1.2 m)
-MOUNT_ANGLE = 3.5
+MOUNT_HEIGHT = 90  # mm (1.2 m)
+MOUNT_ANGLE = 9.5
 
 # Loading camera correction matrices
 models_dir = Path(__file__).parent.parent / "models"
