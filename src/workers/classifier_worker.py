@@ -96,8 +96,11 @@ def preprocess_epoch(data: np.ndarray) -> torch.Tensor:
 def filter_for_svm(data: np.ndarray) -> np.ndarray:
     """Replicates epoch_filter(bands=[(13,30)], notch_freq=60, ref='average') — no z-score.
 
+    Clips to N_TIMEPOINTS BEFORE filtering so the FIR filter sees the same 901-sample
+    window it saw during training (not the full 5s TRIAL_DUR+LEAD_IN window).
     Returns (n_channels, N_TIMEPOINTS) float64 array ready for bandpower extraction.
     """
+    data = data[:, -CONFIGS["N_TIMEPOINTS"]:]   # clip to 901 first — matches training
     info = mne.create_info(ch_names=CH_NAMES, sfreq=CONFIGS["SFREQ"], ch_types="eeg")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
@@ -105,7 +108,7 @@ def filter_for_svm(data: np.ndarray) -> np.ndarray:
         epoch = mne.EpochsArray(arr, info, events=np.array([[0, 0, 1]]), tmin=0, verbose=False)
         epoch.filter(13, 30.0, verbose=False)
         epoch.set_eeg_reference(ref_channels="average", projection=False, verbose=False)
-    return epoch.get_data()[0][:, -CONFIGS["N_TIMEPOINTS"]:]
+    return epoch.get_data()[0]
 
 
 def extract_bandpower_features(filtered: np.ndarray) -> np.ndarray:
