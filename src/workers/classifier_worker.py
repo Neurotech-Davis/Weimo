@@ -11,6 +11,8 @@ import numpy as np
 import torch
 import mne
 
+mne.set_log_level("ERROR")
+
 from mne_lsl.lsl import local_clock
 from mne_lsl.stream import StreamLSL
 
