@@ -6,24 +6,25 @@ For this worker to work, it has to be connected to the DSI-7s LSL streamer
 import time
 import sys
 import os
+import pickle
+import warnings
 
 import numpy as np
 import torch
 import mne
 
 mne.set_log_level("ERROR")
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="mne")
+
 from mne_lsl.lsl import local_clock
 from mne_lsl.stream import StreamLSL
-
-import warnings
-
-warnings.filterwarnings("ignore", category=RuntimeWarning, module="mne")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from ml_model import models
 
 MOVE_CONFIDENCE_THRESHOLD = 0.95
-LABEL_MAP = {0: "other", 1: "move"}
+JAW_CONFIDENCE_THRESHOLD  = 0.80
+LABEL_MAP = {0: "idle", 1: "move", 2: "jaw_clench"}
 EXCLUDE = {"Trigger", "Event"}
 
 CONFIGS = {
@@ -38,8 +39,19 @@ CONFIGS["N_TIMEPOINTS"] = (
     int(CONFIGS["SFREQ"] * CONFIGS["TRIAL_DUR"]) + 1
 )  # MNE tmax inclusive → 901
 
-MODEL_PATH = "./models/DeepConvNet_per_epoch.pt"
-STREAM_NAME = "WS-default"
+MODEL_PATH     = "./models/DeepConvNet_per_epoch.pt"
+SVM_MODEL_PATH = "./loso_classical_models/jaw_clench/per_epoch/SVM_linear__beta__bandpower.pkl"
+STREAM_NAME    = "WS-default"
+
+CH_NAMES = [
+    "EEG LE-Pz", "EEG F4-Pz", "EEG C4-Pz", "EEG P4-Pz",
+    "EEG P3-Pz", "EEG C3-Pz", "EEG F3-Pz", "Pz",
+]
+
+_BP_BANDS = {
+    "theta": (4, 8), "alpha": (8, 13), "beta": (13, 30),
+    "gamma": (30, 55), "emg": (65, 100),
+}
 
 
 # ── Preprocessing ─────────────────────────────────────────────────────────────
@@ -79,6 +91,38 @@ def preprocess_epoch(data: np.ndarray) -> torch.Tensor:
     X = (X - mean) / std
 
     return torch.from_numpy(X).float().unsqueeze(0).unsqueeze(0)  # (1, 1, 8, 900)
+
+
+def filter_for_svm(data: np.ndarray) -> np.ndarray:
+    """Replicates epoch_filter(bands=[(13,30)], notch_freq=60, ref='average') — no z-score.
+
+    Returns (n_channels, N_TIMEPOINTS) float64 array ready for bandpower extraction.
+    """
+    info = mne.create_info(ch_names=CH_NAMES, sfreq=CONFIGS["SFREQ"], ch_types="eeg")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        arr   = mne.filter.notch_filter(data[np.newaxis], Fs=CONFIGS["SFREQ"], freqs=60.0, verbose=False)
+        epoch = mne.EpochsArray(arr, info, events=np.array([[0, 0, 1]]), tmin=0, verbose=False)
+        epoch.filter(13, 30.0, verbose=False)
+        epoch.set_eeg_reference(ref_channels="average", projection=False, verbose=False)
+    return epoch.get_data()[0][:, -CONFIGS["N_TIMEPOINTS"]:]
+
+
+def extract_bandpower_features(filtered: np.ndarray) -> np.ndarray:
+    """Bandpower features matching extract_bandpower() used during SVM training.
+
+    Returns (1, 40) float32 array: 5 bands × 8 channels, log-mean power each.
+    """
+    feats = []
+    for c in range(filtered.shape[0]):
+        psd, freqs = mne.time_frequency.psd_array_welch(
+            filtered[c][np.newaxis], sfreq=CONFIGS["SFREQ"],
+            fmin=1, fmax=150, n_fft=min(filtered.shape[1], 256), verbose=False,
+        )
+        for lo, hi in _BP_BANDS.values():
+            idx = (freqs >= lo) & (freqs <= hi)
+            feats.append(float(np.log(psd[0, idx].mean() + 1e-10)))
+    return np.array(feats, dtype=np.float32).reshape(1, -1)
 
 
 # ── Signal quality check ──────────────────────────────────────────────────────
@@ -136,8 +180,15 @@ def load_model():
     model = models.DeepConvNet(CONFIGS["N_CHANNELS"], CONFIGS["N_CLASSES"]).to("cpu")
     model.load_state_dict(torch.load(MODEL_PATH, map_location="cpu"))
     model.eval()
-    print(f"[classifier_worker] Loaded model from {MODEL_PATH}")
+    print(f"[classifier_worker] Loaded DL model from {MODEL_PATH}")
     return model
+
+
+def load_svm():
+    with open(SVM_MODEL_PATH, "rb") as f:
+        svm = pickle.load(f)
+    print(f"[classifier_worker] Loaded SVM from {SVM_MODEL_PATH}")
+    return svm
 
 
 # ── Worker ────────────────────────────────────────────────────────────────────
@@ -148,6 +199,7 @@ def classifier_worker(shared_state):
     try:
         # SETUP
         model = load_model()
+        svm   = load_svm()
         stream = attempt_LSL_connection(max_retries=10, retry_delay=2)
         if stream is None:
             raise RuntimeError(
@@ -208,34 +260,43 @@ def classifier_worker(shared_state):
                 time.sleep(0.1)
                 continue
 
-            # preprocess
+            # ── DL inference (move) ───────────────────────────────────────────
             x = preprocess_epoch(data)
-            # DEBUG — remove once hardware validated
-            # print(
-            #     f"  [preprocess] raw    range: [{data.min():.6f}, {data.max():.6f}]  std: {data.std():.6f}"
-            # )
-            # print(
-            #     f"  [preprocess] scaled range: [{x.min():.3f}, {x.max():.3f}]  std: {x.std():.3f}"
-            # )
             if torch.isnan(x).any():
                 print("[classifier_worker] ⚠ NaNs in tensor — skipping")
                 continue
 
-            # inference — model outputs probabilities directly (softmax in forward())
             with torch.no_grad():
-                output = model(x)
-                pred = output.argmax(1).item()
-                conf = output[0, pred].item()
+                dl_out  = model(x)
+                dl_pred = dl_out.argmax(1).item()
+                dl_conf = dl_out[0, dl_pred].item()
 
-            label = LABEL_MAP[pred]
-            print(f"[classifier_worker] pred={label:<12} conf={conf:.2f}")
+            # ── SVM inference (jaw_clench) ────────────────────────────────────
+            filtered      = filter_for_svm(data)
+            feats         = extract_bandpower_features(filtered)
+            svm_pred_raw  = svm.predict(feats)[0]          # 0=idle, 1=jaw_clench
+            svm_conf      = svm.predict_proba(feats)[0][svm_pred_raw]
 
-            # only write confident predictions — motor_worker reads this
-            if conf >= MOVE_CONFIDENCE_THRESHOLD:
-                shared_state.prediction.value = pred
+            # ── Combine & decide ──────────────────────────────────────────────
+            # move takes priority; jaw_clench only fires if move not confident
+            if dl_pred == 1 and dl_conf >= MOVE_CONFIDENCE_THRESHOLD:
+                final_pred = 1   # move
+            elif svm_pred_raw == 1 and svm_conf >= JAW_CONFIDENCE_THRESHOLD:
+                final_pred = 2   # jaw_clench
             else:
-                shared_state.prediction.value = 0  # treat low confidence as idle
-            shared_state.pred_confidence.value = float(conf)
+                final_pred = 0   # idle
+
+            dl_label  = "move"       if dl_pred == 1  else "other"
+            svm_label = "jaw_clench" if svm_pred_raw == 1 else "idle"
+            final_label = LABEL_MAP[final_pred]
+            print(
+                f"[classifier_worker]  DL: {dl_label:<12} {dl_conf:.2f}"
+                f"  |  SVM: {svm_label:<12} {svm_conf:.2f}"
+                f"  →  {final_label}"
+            )
+
+            shared_state.prediction.value    = final_pred
+            shared_state.pred_confidence.value = float(dl_conf if final_pred == 1 else svm_conf)
 
             elapsed = time.perf_counter() - t_start
             remaining = CONFIGS["STRIDE_SEC"] - elapsed
