@@ -1,13 +1,5 @@
 """
-Camera-nav debug GUI.
-
-Shows the USB camera feed. Click or hover to select a pixel; the same
-undistort → pixel_to_point pipeline used by pathfinding_worker runs in
-real time and the computed angle / distance are shown alongside controls
-to tweak camera height and mount angle.
-
-Run from repo root:
-    python pathfinding/camera_nav/nav_debug_gui.py
+Camera-Nav Debug GUI (Fully Integrated)
 """
 
 import sys
@@ -16,138 +8,119 @@ import numpy as np
 import cv2
 
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QLabel,
-    QVBoxLayout, QHBoxLayout, QGridLayout,
-    QDoubleSpinBox, QGroupBox, QSizePolicy,
+    QApplication,
+    QMainWindow,
+    QWidget,
+    QLabel,
+    QVBoxLayout,
+    QHBoxLayout,
+    QGridLayout,
+    QDoubleSpinBox,
+    QGroupBox,
+    QSizePolicy,
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont
+from PyQt6.QtGui import QImage, QPixmap
 
+# Ensure the parent directory is in the path so imports work
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from pathfinding.camera_nav.screen_to_location import CameraConfig, pixel_to_point
 
-# ── Calibration paths ──────────────────────────────────────────────────────────
+# ── Calibration ────────────────────────────────────────────────────────────────
 
 CALIB_DIR = os.path.join(os.path.dirname(__file__), "..", "calibration", "matrices")
 
+
 def load_calibration():
-    K     = np.load(os.path.join(CALIB_DIR, "intrinsicNew_usb.npy"))
-    dist  = np.load(os.path.join(CALIB_DIR, "dist_usb.npy"))
+    # Keep the distinction between the raw source matrix and the optimal new matrix
+    K_new = np.load(os.path.join(CALIB_DIR, "intrinsicNew_usb.npy"))
     K_raw = np.load(os.path.join(CALIB_DIR, "intrinsic_usb.npy"))
-    return K, K_raw, dist
+    dist = np.load(os.path.join(CALIB_DIR, "dist_usb.npy"))
+    return K_new, K_raw, dist
 
 
-# ── Camera feed widget ─────────────────────────────────────────────────────────
+# ── Interactive Video Label ────────────────────────────────────────────────────
 
-class CameraFeed(QLabel):
-    """Displays the camera frame and emits the pixel under the mouse."""
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
+class InteractiveVideoLabel(QLabel):
+    """Handles video display and calculates true frame coordinates from mouse position."""
+
+    def __init__(self):
+        super().__init__()
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumSize(640, 480)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setStyleSheet("background: #111;")
         self.setMouseTracking(True)
 
-        self._frame_w = 640
-        self._frame_h = 480
-        self._cursor_px = None   # (x, y) in camera pixels, or None
-        self._pixmap = None
-
-    def set_frame(self, bgr_frame: np.ndarray):
-        """Update the displayed frame (BGR numpy array)."""
-        self._frame_h, self._frame_w = bgr_frame.shape[:2]
-        rgb = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
-        h, w, ch = rgb.shape
-        img = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
-        self._pixmap = QPixmap.fromImage(img)
-        self.update()
-
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        if self._pixmap is None or self._cursor_px is None:
-            return
-
-        # figure out where the pixmap is drawn inside the label
-        lw, lh = self.width(), self.height()
-        pw, ph = self._pixmap.width(), self._pixmap.height()
-        scale  = min(lw / pw, lh / ph)
-        draw_w = int(pw * scale)
-        draw_h = int(ph * scale)
-        off_x  = (lw - draw_w) // 2
-        off_y  = (lh - draw_h) // 2
-
-        cx, cy = self._cursor_px
-        sx = int(off_x + cx * scale)
-        sy = int(off_y + cy * scale)
-
-        p = QPainter(self)
-        pen = QPen(QColor(0, 255, 0), 2)
-        p.setPen(pen)
-        arm = 14
-        p.drawLine(sx - arm, sy, sx + arm, sy)
-        p.drawLine(sx, sy - arm, sx, sy + arm)
-        p.drawEllipse(sx - 5, sy - 5, 10, 10)
-        p.end()
-
-    def _label_to_camera(self, lx, ly):
-        """Convert label-space coordinates to camera pixel coordinates."""
-        if self._pixmap is None:
-            return None
-        lw, lh = self.width(), self.height()
-        pw, ph = self._pixmap.width(), self._pixmap.height()
-        scale  = min(lw / pw, lh / ph)
-        draw_w = int(pw * scale)
-        draw_h = int(ph * scale)
-        off_x  = (lw - draw_w) // 2
-        off_y  = (lh - draw_h) // 2
-        cx = (lx - off_x) / scale
-        cy = (ly - off_y) / scale
-        if 0 <= cx < pw and 0 <= cy < ph:
-            return int(cx), int(cy)
-        return None
+        self.frame_w = 640
+        self.frame_h = 480
+        self.cursor_px = None  # (x, y) relative to true frame resolution
 
     def mouseMoveEvent(self, event):
-        pt = self._label_to_camera(event.position().x(), event.position().y())
-        self._cursor_px = pt
-        self.update()
-        if pt is not None:
-            self.window().on_pixel_selected(*pt)
+        self._update_cursor(event.position().x(), event.position().y())
 
     def mousePressEvent(self, event):
-        pt = self._label_to_camera(event.position().x(), event.position().y())
-        self._cursor_px = pt
-        self.update()
-        if pt is not None:
-            self.window().on_pixel_selected(*pt)
+        self._update_cursor(event.position().x(), event.position().y())
 
     def leaveEvent(self, event):
-        self._cursor_px = None
-        self.update()
+        self.cursor_px = None
+        if self.window() and hasattr(self.window(), "on_pixel_selected"):
+            self.window().on_pixel_selected(None, None)
+
+    def _update_cursor(self, lx, ly):
+        if self.pixmap() is None:
+            return
+
+        # Label dimensions vs Scaled Pixmap dimensions
+        lw, lh = self.width(), self.height()
+        pw, ph = self.pixmap().width(), self.pixmap().height()
+
+        # Calculate offsets caused by Qt.KeepAspectRatio centering
+        off_x = (lw - pw) / 2.0
+        off_y = (lh - ph) / 2.0
+
+        # Mouse position relative to the actual image pixels
+        px_pixmap = lx - off_x
+        py_pixmap = ly - off_y
+
+        # If hovering inside the image bounds, scale back to original camera resolution
+        if 0 <= px_pixmap <= pw and 0 <= py_pixmap <= ph:
+            true_x = int((px_pixmap / pw) * self.frame_w)
+            true_y = int((py_pixmap / ph) * self.frame_h)
+            self.cursor_px = (true_x, true_y)
+            if self.window() and hasattr(self.window(), "on_pixel_selected"):
+                self.window().on_pixel_selected(true_x, true_y)
+        else:
+            self.cursor_px = None
+            if self.window() and hasattr(self.window(), "on_pixel_selected"):
+                self.window().on_pixel_selected(None, None)
 
 
 # ── Main window ────────────────────────────────────────────────────────────────
 
-class NavDebugWindow(QMainWindow):
 
+class NavDebugWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Camera-Nav Debug")
 
-        self.K, self.K_raw, self.dist = load_calibration()
-        self.cam_cfg = CameraConfig(height=110, angle=-10)
+        # Load math components
+        self.K_new, self.K_raw, self.dist = load_calibration()
+        self.cam_cfg = CameraConfig(height=110.0, angle=-10.0)
 
-        self.cap = cv2.VideoCapture(1)   # USB camera
+        # Initialize hardware
+        self.cap = cv2.VideoCapture(64, cv2.CAP_V4L2)
         if not self.cap.isOpened():
-            print("Warning: could not open camera index 1, trying 0")
-            self.cap = cv2.VideoCapture(0)
+            print("FATAL ERROR: Could not open /dev/video64.")
+            sys.exit(1)
 
         self._build_ui()
 
-        self._timer = QTimer()
-        self._timer.timeout.connect(self._tick)
-        self._timer.start(33)   # ~30 fps
+        # Start render loop
+        self.timer = QTimer()
+        self.timer.timeout.connect(self._update_frame)
+        self.timer.start(33)  # ~30 fps
 
     # ── UI construction ────────────────────────────────────────────────────────
 
@@ -159,8 +132,8 @@ class NavDebugWindow(QMainWindow):
         layout.setSpacing(12)
 
         # left: camera feed
-        self.feed = CameraFeed()
-        layout.addWidget(self.feed, stretch=3)
+        self.feed_label = InteractiveVideoLabel()
+        layout.addWidget(self.feed_label, stretch=3)
 
         # right: controls + output
         sidebar = QWidget()
@@ -171,25 +144,25 @@ class NavDebugWindow(QMainWindow):
         vbox.setSpacing(16)
         layout.addWidget(sidebar)
 
-        # ── Camera config ──────────────────────────────────────────────────────
+        # ── Camera config ──
         cfg_group = QGroupBox("Camera mount")
         cfg_group.setStyleSheet(self._group_style())
         cfg_layout = QGridLayout(cfg_group)
         cfg_layout.setSpacing(6)
 
         cfg_layout.addWidget(self._label("Height (mm)"), 0, 0)
-        self.height_spin = self._spin(1, 5000, 110, 1)
+        self.height_spin = self._spin(1, 5000, self.cam_cfg.height, 1)
         self.height_spin.valueChanged.connect(self._on_cfg_changed)
         cfg_layout.addWidget(self.height_spin, 0, 1)
 
         cfg_layout.addWidget(self._label("Angle (°)"), 1, 0)
-        self.angle_spin = self._spin(-90, 90, -10, 0.5)
+        self.angle_spin = self._spin(-90, 90, self.cam_cfg.angle, 0.5)
         self.angle_spin.valueChanged.connect(self._on_cfg_changed)
         cfg_layout.addWidget(self.angle_spin, 1, 1)
 
         vbox.addWidget(cfg_group)
 
-        # ── Output ─────────────────────────────────────────────────────────────
+        # ── Output ──
         out_group = QGroupBox("Output")
         out_group.setStyleSheet(self._group_style())
         out_layout = QGridLayout(out_group)
@@ -214,7 +187,6 @@ class NavDebugWindow(QMainWindow):
         vbox.addWidget(out_group)
         vbox.addStretch()
 
-        # hint
         hint = QLabel("Move mouse over feed\nto compute location")
         hint.setStyleSheet("color: #666; font-size: 11px;")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -251,46 +223,88 @@ class NavDebugWindow(QMainWindow):
             "QGroupBox::title { subcontrol-origin: margin; left: 8px; }"
         )
 
-    # ── Slots ──────────────────────────────────────────────────────────────────
+    # ── Logic & Slots ──────────────────────────────────────────────────────────
 
     def _on_cfg_changed(self):
         self.cam_cfg = CameraConfig(
             height=self.height_spin.value(),
             angle=self.angle_spin.value(),
         )
+        # Re-trigger math on current cursor position
+        if self.feed_label.cursor_px:
+            self.on_pixel_selected(*self.feed_label.cursor_px)
 
-    def on_pixel_selected(self, px: int, py: int):
-        """Called whenever the mouse is over a valid camera pixel."""
+    def on_pixel_selected(self, px, py):
+        """Executes your pathfinding math engine dynamically."""
+        if px is None or py is None:
+            self.lbl_pixel.setText("--")
+            self.lbl_undist.setText("--")
+            self.lbl_angle.setText("--")
+            self.lbl_dist.setText("--")
+            self.lbl_dist.setStyleSheet(
+                "color: #0f0; font-family: monospace; font-size: 13px;"
+            )
+            return
+
         self.lbl_pixel.setText(f"({px}, {py})")
 
-        # same undistort step as pathfinding_worker.py
+        # 1. Optical correction mapping
         pt = np.array([[[px, py]]], dtype=np.float32)
-        undist = cv2.undistortPoints(pt, self.K_raw, self.dist, P=self.K)
+        undist = cv2.undistortPoints(pt, self.K_raw, self.dist, P=self.K_new)
         ux = int(undist[0, 0, 0])
         uy = int(undist[0, 0, 1])
         self.lbl_undist.setText(f"({ux}, {uy})")
 
-        h_angle, dist = pixel_to_point(ux, uy, self.K, self.cam_cfg)
+        # 2. Physical geometry mapping
+        h_angle, dist = pixel_to_point(ux, uy, self.K_new, self.cam_cfg)
         self.lbl_angle.setText(f"{h_angle:+.2f}°")
+
         if dist == float("inf"):
-            self.lbl_dist.setText("∞  (above horizon)")
-            self.lbl_dist.setStyleSheet("color: #f80; font-family: monospace; font-size: 13px;")
+            self.lbl_dist.setText("∞  (horizon)")
+            self.lbl_dist.setStyleSheet(
+                "color: #f80; font-family: monospace; font-size: 13px;"
+            )
         else:
             self.lbl_dist.setText(f"{dist:.1f} mm")
-            self.lbl_dist.setStyleSheet("color: #0f0; font-family: monospace; font-size: 13px;")
+            self.lbl_dist.setStyleSheet(
+                "color: #0f0; font-family: monospace; font-size: 13px;"
+            )
 
-    def _tick(self):
+    def _update_frame(self):
         ret, frame = self.cap.read()
         if not ret:
             return
-        # undistort the display frame so the visual matches the math
-        frame = cv2.undistort(frame, self.K_raw, self.dist, None, self.K)
-        self.feed.set_frame(frame)
+
+        self.feed_label.frame_h, self.feed_label.frame_w = frame.shape[:2]
+
+        # Draw crosshair directly on the raw cv2 matrix
+        if self.feed_label.cursor_px:
+            cx, cy = self.feed_label.cursor_px
+            arm = 14
+            cv2.line(frame, (cx - arm, cy), (cx + arm, cy), (0, 255, 0), 2)
+            cv2.line(frame, (cx, cy - arm), (cx, cy + arm), (0, 255, 0), 2)
+            cv2.circle(frame, (cx, cy), 5, (0, 255, 0), 2)
+
+        # Convert and render with strict memory retention (.copy)
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb_frame.shape
+        bytes_per_line = ch * w
+
+        q_img = QImage(
+            rgb_frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888
+        ).copy()
+
+        scaled_pixmap = QPixmap.fromImage(q_img).scaled(
+            self.feed_label.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self.feed_label.setPixmap(scaled_pixmap)
 
     def closeEvent(self, event):
-        self._timer.stop()
+        self.timer.stop()
         self.cap.release()
-        super().closeEvent(event)
+        event.accept()
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
