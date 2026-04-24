@@ -38,7 +38,7 @@ CONFIGS["N_TIMEPOINTS"] = (
     int(CONFIGS["SFREQ"] * CONFIGS["TRIAL_DUR"]) + 1
 )  # MNE tmax inclusive → 901
 
-MODEL_PATH = "./models/DeepConvNet_per_epoch_binary_move.pt"
+MODEL_PATH = "./models/DeepConvNet_per_epoch.pt"
 STREAM_NAME = "WS-default"
 
 
