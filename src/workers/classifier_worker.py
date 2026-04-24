@@ -40,7 +40,7 @@ CONFIGS["N_TIMEPOINTS"] = (
 )  # MNE tmax inclusive → 901
 
 MODEL_PATH     = "./models/DeepConvNet_per_epoch.pt"
-SVM_MODEL_PATH = "./loso_classical_models/jaw_clench/per_epoch/SVM_linear__beta__bandpower.pkl"
+SVM_MODEL_PATH = "./models/SVM_linear__beta__bandpower.pkl"
 STREAM_NAME    = "WS-default"
 
 CH_NAMES = [
