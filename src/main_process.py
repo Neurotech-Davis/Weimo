@@ -12,6 +12,7 @@ from workers.pathcam_worker import pathcam_worker
 from workers.pathfinding_worker import pathfinding_worker
 from workers.vlm_worker import vlm_worker
 from workers.lidar_worker import lidar_worker
+from workers.yolo_worker import yolo_worker
 import multiprocessing as mp
 
 
@@ -37,10 +38,11 @@ def main():
     )
     p_vlm = mp.Process(target=vlm_worker, args=(shared_state,), daemon=True)
     p_lidar = mp.Process(target=lidar_worker, args=(shared_state,))
+    p_yolo  = mp.Process(target=yolo_worker,  args=(shared_state,), daemon=True)
 
     # process_arr = [p_tracker]
     # process_arr = [p_tracker, p_pathfinding, p_motor, p_pathcam, p_vlm, p_lidar]
-    process_arr = [p_tracker, p_pathfinding, p_motor, p_pathcam, p_lidar]
+    process_arr = [p_tracker, p_pathfinding, p_motor, p_pathcam, p_lidar, p_yolo]
     if record_eeg:
         process_arr.append(p_recorder)
 

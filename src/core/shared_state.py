@@ -97,6 +97,13 @@ class SharedState:
         self.lidar_distances = mp.Array(ctypes.c_float, 360)
 
         ### -----------
+        ### YOLO
+        ### -----------
+        self.yolo_running = mp.Value(ctypes.c_bool, False)
+        self.mount_height = 300.0   # mm — update to actual hardware value
+        self.mount_angle  = 30.0    # degrees downward — update to actual hardware value
+
+        ### -----------
         ### VLM Safety
         ### -----------
         self.vlm_running = mp.Value(ctypes.c_bool, False)
