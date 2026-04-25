@@ -21,17 +21,17 @@ import mne
 # Install with: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib
 # If these aren't installed the recorder still works — it just saves locally only.
 
-try:
-    from googleapiclient.discovery import build
-    from googleapiclient.http import MediaFileUpload
-    from google.oauth2.credentials import Credentials
-    from google_auth_oauthlib.flow import InstalledAppFlow
-    from google.auth.transport.requests import Request
-    import pickle as _pickle
-    GDRIVE_AVAILABLE = True
-except ImportError:
-    GDRIVE_AVAILABLE = False
-    print("[EEGRecorder] Google Drive SDK not installed — local save only.")
+# try:
+#     from googleapiclient.discovery import build
+#     from googleapiclient.http import MediaFileUpload
+#     from google.oauth2.credentials import Credentials
+#     from google_auth_oauthlib.flow import InstalledAppFlow
+#     from google.auth.transport.requests import Request
+#     import pickle as _pickle
+#     GDRIVE_AVAILABLE = True
+# except ImportError:
+#     GDRIVE_AVAILABLE = False
+#     print("[EEGRecorder] Google Drive SDK not installed — local save only.")
 
 
 SCOPES          = ['https://www.googleapis.com/auth/drive.file']
