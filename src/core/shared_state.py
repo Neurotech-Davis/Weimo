@@ -104,6 +104,16 @@ class SharedState:
         self.vlm_is_busy = mp.Value(ctypes.c_bool, False)
         # To avoid double-triggering the same move
         self.vlm_processed_dist = mp.Value(ctypes.c_float, 0.0)
+        # Add to your SharedState class __init__:
+        from multiprocessing import Value, Event
+
+        # Recording state
+        self.recording_active  = Value('b', False)
+        self.annotation_count  = Value('i', 0)
+
+        # Feedback events — set by UI, cleared by classifier worker
+        self.feedback_correct  = Event()
+        self.feedback_wrong    = Event()
         
     def get_gaze(self) -> tuple:
         return self.gaze_x.value, self.gaze_y.value

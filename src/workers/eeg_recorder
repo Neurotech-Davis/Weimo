@@ -1,0 +1,339 @@
+"""
+eeg_recorder.py
+
+Accumulates raw EEG data from the LSL stream into a buffer,
+attaches prediction + feedback annotations, and saves to .fif
+on session end.
+
+Saves to:
+  1. Local path (Google Drive folder if mounted, else ./live_eeg/)
+  2. Uploads via Google Drive API if credentials are available
+"""
+
+import os
+import time
+import datetime
+import threading
+import numpy as np
+import mne
+
+# ── Google Drive upload (optional) ────────────────────────────────────────────
+# Install with: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib
+# If these aren't installed the recorder still works — it just saves locally only.
+
+try:
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaFileUpload
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from google.auth.transport.requests import Request
+    import pickle as _pickle
+    GDRIVE_AVAILABLE = True
+except ImportError:
+    GDRIVE_AVAILABLE = False
+    print("[EEGRecorder] Google Drive SDK not installed — local save only.")
+
+
+SCOPES          = ['https://www.googleapis.com/auth/drive.file']
+CREDENTIALS_FILE = './credentials.json'   # OAuth2 credentials from Google Cloud Console
+TOKEN_FILE       = './token.pickle'
+
+
+CH_NAMES = [
+    "EEG LE-Pz", "EEG F4-Pz", "EEG C4-Pz", "EEG P4-Pz",
+    "EEG P3-Pz", "EEG C3-Pz", "EEG F3-Pz", "Pz",
+]
+SFREQ = 300
+
+
+class EEGRecorder:
+    """
+    Thread-safe EEG recorder.
+
+    Usage:
+        recorder = EEGRecorder(sfreq=300, ch_names=CH_NAMES)
+        recorder.start()
+
+        # In your data loop:
+        recorder.append(samples)              # samples: (n_channels, n_new_samples)
+        recorder.annotate_prediction(pred, conf)
+        recorder.annotate_feedback(correct=True)
+
+        # On session end:
+        recorder.stop()
+        path = recorder.save(subject_id='chengyi')
+    """
+
+    def __init__(self, sfreq: int, ch_names: list,
+                 local_dir: str = None,
+                 gdrive_folder_id: str = None):
+
+        self.sfreq          = sfreq
+        self.ch_names       = ch_names
+        self.gdrive_folder_id = gdrive_folder_id
+
+        # Local save directory — prefer Google Drive mount, fall back to ./live_eeg
+        if local_dir:
+            self.local_dir = local_dir
+        else:
+            # Common Google Drive mount locations
+            candidates = [
+                os.path.expanduser("~/Google Drive/My Drive/live_eeg"),
+                os.path.expanduser("~/Library/CloudStorage/GoogleDrive-*/My Drive/live_eeg"),
+                os.path.expanduser("~/GoogleDrive/live_eeg"),
+                "./live_eeg",
+            ]
+            self.local_dir = next(
+                (p for p in candidates if os.path.exists(os.path.dirname(p))),
+                "./live_eeg"
+            )
+
+        os.makedirs(self.local_dir, exist_ok=True)
+
+        # Data buffer — grows during the session
+        self._lock          = threading.Lock()
+        self._data_chunks   = []      # list of (n_channels, n_samples) arrays
+        self._total_samples = 0
+        self._start_time    = None
+
+        # Annotations — (onset_sec, duration_sec, description)
+        self._annotations   = []
+
+        self._active        = False
+        self._last_pred     = None
+        self._last_pred_time = None
+        self._last_pred_conf = None
+
+        print(f"[EEGRecorder] Local save dir: {self.local_dir}")
+        if gdrive_folder_id:
+            print(f"[EEGRecorder] Google Drive folder ID: {gdrive_folder_id}")
+
+    # ── Lifecycle ──────────────────────────────────────────────────────────────
+
+    def start(self):
+        self._start_time    = time.time()
+        self._active        = True
+        self._data_chunks   = []
+        self._total_samples = 0
+        self._annotations   = []
+        print("[EEGRecorder] Recording started.")
+
+    def stop(self):
+        self._active = False
+        print(f"[EEGRecorder] Recording stopped. "
+              f"{self._total_samples} samples  |  "
+              f"{len(self._annotations)} annotations")
+
+    @property
+    def is_active(self):
+        return self._active
+
+    @property
+    def annotation_count(self):
+        return len(self._annotations)
+
+    # ── Data ingestion ─────────────────────────────────────────────────────────
+
+    def append(self, samples: np.ndarray):
+        """
+        Append raw EEG samples to the recording buffer.
+        samples: (n_channels, n_new_samples) float32
+        """
+        if not self._active:
+            return
+        with self._lock:
+            self._data_chunks.append(samples.astype(np.float32))
+            self._total_samples += samples.shape[1]
+
+    # ── Annotation ─────────────────────────────────────────────────────────────
+
+    def annotate_prediction(self, pred: int, conf: float):
+        """
+        Called every inference step. Stores the last prediction and its
+        timestamp so feedback can reference it.
+        """
+        if not self._active:
+            return
+
+        label_map = {0: "idle", 1: "move", 2: "jaw_clench"}
+        label     = label_map.get(pred, f"class_{pred}")
+        onset_sec = time.time() - self._start_time
+
+        self._last_pred      = pred
+        self._last_pred_time = onset_sec
+        self._last_pred_conf = conf
+
+        # Always annotate every prediction so the raw record is complete
+        with self._lock:
+            self._annotations.append((
+                onset_sec,
+                3.0,                              # same trial duration as training
+                f"pred_{label}_conf{conf:.2f}"
+            ))
+
+    def annotate_feedback(self, correct: bool):
+        """
+        Called when user presses ✓ or ✗.
+        Adds a feedback annotation at the same onset as the last prediction.
+        """
+        if not self._active or self._last_pred_time is None:
+            return
+
+        verdict = "correct" if correct else "wrong"
+        label_map = {0: "idle", 1: "move", 2: "jaw_clench"}
+        pred_name = label_map.get(self._last_pred, "?")
+
+        with self._lock:
+            self._annotations.append((
+                self._last_pred_time,
+                3.0,
+                f"feedback_{verdict}_{pred_name}"
+            ))
+
+        print(f"[EEGRecorder] Feedback: {verdict} → {pred_name} "
+              f"(t={self._last_pred_time:.1f}s)")
+
+    # ── Save ───────────────────────────────────────────────────────────────────
+
+    def save(self, subject_id: str = "subject") -> str:
+        """
+        Concatenates all buffered data into an MNE Raw object,
+        attaches annotations, and saves as .fif.
+
+        Returns the local path of the saved file.
+        """
+        if self._total_samples == 0:
+            print("[EEGRecorder] Nothing to save — buffer empty.")
+            return None
+
+        # Build filename with timestamp
+        ts       = datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")
+        filename = f"{subject_id}_live_{ts}.fif"
+        filepath = os.path.join(self.local_dir, filename)
+
+        with self._lock:
+            data_chunks   = list(self._data_chunks)
+            annotations   = list(self._annotations)
+
+        # Concatenate all data chunks
+        data = np.concatenate(data_chunks, axis=1)   # (n_channels, total_samples)
+        print(f"[EEGRecorder] Saving: {data.shape}  ({data.shape[1]/self.sfreq:.1f}s)")
+
+        # Create MNE Raw object
+        info = mne.create_info(
+            ch_names=self.ch_names,
+            sfreq=self.sfreq,
+            ch_types="eeg"
+        )
+        raw = mne.io.RawArray(data, info, verbose=False)
+
+        # Attach annotations
+        if annotations:
+            onsets      = np.array([a[0] for a in annotations])
+            durations   = np.array([a[1] for a in annotations])
+            descriptions = [a[2]        for a in annotations]
+            raw.set_annotations(
+                mne.Annotations(onsets, durations, descriptions)
+            )
+            print(f"[EEGRecorder] Attached {len(annotations)} annotations")
+
+        # Save .fif
+        raw.save(filepath, overwrite=True, verbose=False)
+        print(f"[EEGRecorder] Saved to: {filepath}")
+
+        # Upload to Google Drive if configured
+        if self.gdrive_folder_id and GDRIVE_AVAILABLE:
+            self._upload_to_gdrive(filepath, filename)
+
+        return filepath
+
+    # ── Google Drive upload ────────────────────────────────────────────────────
+
+    def _get_gdrive_service(self):
+        """Authenticate and return a Drive API service object."""
+        creds = None
+
+        if os.path.exists(TOKEN_FILE):
+            with open(TOKEN_FILE, 'rb') as f:
+                creds = _pickle.load(f)
+
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                if not os.path.exists(CREDENTIALS_FILE):
+                    print("[EEGRecorder] credentials.json not found — "
+                          "skipping Drive upload. "
+                          "Download it from Google Cloud Console.")
+                    return None
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    CREDENTIALS_FILE, SCOPES
+                )
+                creds = flow.run_local_server(port=0)
+
+            with open(TOKEN_FILE, 'wb') as f:
+                _pickle.dump(creds, f)
+
+        return build('drive', 'v3', credentials=creds)
+
+    def _upload_to_gdrive(self, filepath: str, filename: str):
+        """Upload a file to the specified Google Drive folder."""
+        try:
+            service = self._get_gdrive_service()
+            if service is None:
+                return
+
+            # Check if live_eeg folder exists inside the target folder
+            # If not, create it
+            folder_id = self._get_or_create_folder(
+                service,
+                folder_name="live_eeg",
+                parent_id=self.gdrive_folder_id
+            )
+
+            file_metadata = {
+                'name':    filename,
+                'parents': [folder_id],
+            }
+            media = MediaFileUpload(filepath, mimetype='application/octet-stream')
+            uploaded = service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id,name,size'
+            ).execute()
+
+            print(f"[EEGRecorder] Uploaded to Drive: "
+                  f"{uploaded['name']}  (id={uploaded['id']}  "
+                  f"size={int(uploaded.get('size',0))//1024}KB)")
+
+        except Exception as e:
+            print(f"[EEGRecorder] Drive upload failed: {e}")
+            print(f"[EEGRecorder] File saved locally at: {filepath}")
+
+    def _get_or_create_folder(self, service, folder_name: str,
+                               parent_id: str) -> str:
+        """Return the Drive folder ID, creating it if it doesn't exist."""
+        # Search for existing folder
+        query = (f"name='{folder_name}' and "
+                 f"'{parent_id}' in parents and "
+                 f"mimeType='application/vnd.google-apps.folder' and "
+                 f"trashed=false")
+        results = service.files().list(
+            q=query, fields="files(id, name)"
+        ).execute()
+        files = results.get('files', [])
+
+        if files:
+            return files[0]['id']
+
+        # Create it
+        metadata = {
+            'name':     folder_name,
+            'mimeType': 'application/vnd.google-apps.folder',
+            'parents':  [parent_id],
+        }
+        folder = service.files().create(
+            body=metadata, fields='id'
+        ).execute()
+        print(f"[EEGRecorder] Created Drive folder: {folder_name}")
+        return folder['id']

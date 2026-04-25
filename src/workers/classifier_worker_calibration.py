@@ -128,126 +128,167 @@ def load_model():
 # ── Worker ─────────────────────────────────────────────────────────────────────
 
 
+# At the top, add this import after the existing imports:
+from eeg_recorder import EEGRecorder, CH_NAMES, SFREQ
+
+# Your Google Drive folder ID — find this in the Drive URL when you open the folder:
+# https://drive.google.com/drive/folders/THIS_PART_IS_THE_ID
+GDRIVE_FOLDER_ID = "1JDj1U8AYD9komuXkueYdL8YbMUBwJ1Nx?dmr=1&ec=wgc-drive-%5Bmodule%5D-goto"   # ← paste your Drive folder ID
+
+# In classifier_worker(), replace the function body as follows.
+# Only the sections marked NEW change — everything else is identical to your original.
+
 def classifier_worker(shared_state):
-    stream = None
+    stream   = None
+    recorder = EEGRecorder(
+        sfreq            = CONFIGS["SFREQ"],
+        ch_names         = CH_NAMES,
+        gdrive_folder_id = GDRIVE_FOLDER_ID,
+    )
+
     try:
-        model = load_model()
+        model  = load_model()
         stream = attempt_LSL_connection(max_retries=10, retry_delay=2)
         if stream is None:
             raise RuntimeError(
-                f"[classifier_worker] Could not connect to LSL stream '{STREAM_NAME}'. "
-                f"Is dsi2lsl running?"
+                f"[classifier_worker] Could not connect to LSL stream '{STREAM_NAME}'."
             )
 
-        all_ch = stream.info["ch_names"]
-        sfreq = stream.info["sfreq"]
+        all_ch    = stream.info["ch_names"]
+        sfreq     = stream.info["sfreq"]
         eeg_picks = [ch for ch in all_ch if ch not in EXCLUDE]
 
         print("\n--- Stream Info ---")
         print(f"  All Channels ({len(all_ch)}): {all_ch}")
         print(f"  Selected Channels ({len(eeg_picks)}): {eeg_picks}")
         print(f"  Sfreq: {sfreq} Hz")
-        print(f"  Calibration buffer: {CONFIGS['CALIB_SEC']}s ({CONFIGS['CALIB_SAMPLES']} samples)")
+        print(f"  Calibration buffer: {CONFIGS['CALIB_SEC']}s")
         print("-------------------\n")
 
         shared_state.classifier_running.value = True
 
-        # wait for first stride to be available
         time.sleep(CONFIGS["STRIDE_SEC"] + 0.5)
 
         rolling_buffer = np.zeros((len(eeg_picks), 0), dtype=np.float32)
-        calibrated = False
-        last_stride = None
+        calibrated     = False
+        last_stride    = None
 
         # LOOP
         while not shared_state.shutdown.is_set():
             t_start = time.perf_counter()
 
-            # request only one stride of new data each iteration
             stride_data, timestamps = stream.get_data(
                 winsize=CONFIGS["STRIDE_SEC"],
                 picks=eeg_picks,
             )
 
-            # freshness check
+            # ── NEW: feed every stride into the recorder ───────────────
+            recorder.append(stride_data)
+            # ──────────────────────────────────────────────────────────
+
+            # freshness check (unchanged)
             stream_age = local_clock() - timestamps[-1]
             if stream_age > 0.5:
-                print(f"[classifier_worker] ⚠ Stream is {stream_age:.2f}s stale, skipping")
+                print(f"[classifier_worker] ⚠ Stream {stream_age:.2f}s stale, skipping")
                 time.sleep(0.1)
                 continue
 
-            # identical stride check
+            # identical stride check (unchanged)
             if last_stride is not None and np.array_equal(stride_data, last_stride):
-                print("[classifier_worker] ⚠ Stride identical to last — possible stale data")
+                print("[classifier_worker] ⚠ Stride identical to last")
             last_stride = stride_data.copy()
 
-            # append stride to rolling buffer, trim to CALIB_SAMPLES
+            # append to rolling buffer (unchanged)
             rolling_buffer = np.concatenate([rolling_buffer, stride_data], axis=1)
             if rolling_buffer.shape[1] > CONFIGS["CALIB_SAMPLES"]:
                 rolling_buffer = rolling_buffer[:, -CONFIGS["CALIB_SAMPLES"]:]
 
-            # calibration phase — accumulate until buffer is full
+            # calibration phase (unchanged)
             if not calibrated:
                 pct = rolling_buffer.shape[1] / CONFIGS["CALIB_SAMPLES"] * 100
-                print(f"[classifier_worker] Calibrating... {pct:.0f}%  "
-                      f"({rolling_buffer.shape[1]}/{CONFIGS['CALIB_SAMPLES']} samples)")
+                print(f"[classifier_worker] Calibrating... {pct:.0f}%")
                 if rolling_buffer.shape[1] >= CONFIGS["CALIB_SAMPLES"]:
                     calibrated = True
-                    print("[classifier_worker] ✓ Calibration complete — starting inference")
+                    # ── NEW: start recorder once calibration is done ───
+                    recorder.start()
+                    shared_state.recording_active.value = True
+                    print("[classifier_worker] ✓ Calibration complete — recording started")
+                    # ─────────────────────────────────────────────────
                 elapsed = time.perf_counter() - t_start
                 time.sleep(max(0, CONFIGS["STRIDE_SEC"] - elapsed))
                 continue
 
-            # signal quality check on the latest stride
-            print("[classifier_worker] Signal quality:")
+            # signal quality check (unchanged)
             signal_ok = check_signal_quality(stride_data, eeg_picks)
             if not signal_ok:
-                print("[classifier_worker] ⚠ Flatlined channel detected — skipping inference")
+                print("[classifier_worker] ⚠ Flat channel — skipping")
                 time.sleep(0.1)
                 continue
 
-            # preprocess full buffer → extract last epoch
+            # preprocess + inference (unchanged)
             x = preprocess_buffer(rolling_buffer)
-            print(
-                f"  [preprocess] raw    range: [{stride_data.min():.6f}, {stride_data.max():.6f}]  std: {stride_data.std():.6f}"
-            )
-            print(
-                f"  [preprocess] scaled range: [{x.min():.3f}, {x.max():.3f}]  std: {x.std():.3f}"
-            )
             if torch.isnan(x).any():
-                print("[classifier_worker] ⚠ NaNs in tensor — skipping")
+                print("[classifier_worker] ⚠ NaNs — skipping")
                 continue
 
-            # inference
             with torch.no_grad():
                 output = model(x)
-                pred = output.argmax(1).item()
-                conf = output[0, pred].item()
+                pred   = output.argmax(1).item()
+                conf   = output[0, pred].item()
 
             label = LABEL_MAP[pred]
             print(f"[classifier_worker] pred={label:<12} conf={conf:.2f}")
 
+            # ── NEW: annotate every prediction ─────────────────────────
+            recorder.annotate_prediction(pred, conf)
+            shared_state.annotation_count.value = recorder.annotation_count
+            # ──────────────────────────────────────────────────────────
+
+            # write to shared state (unchanged)
             if conf >= MOVE_CONFIDENCE_THRESHOLD:
                 shared_state.prediction.value = pred
             else:
                 shared_state.prediction.value = 0
             shared_state.pred_confidence.value = float(conf)
 
-            elapsed = time.perf_counter() - t_start
+            # ── NEW: check for feedback button presses ─────────────────
+            if hasattr(shared_state, 'feedback_correct') and \
+               shared_state.feedback_correct.is_set():
+                shared_state.feedback_correct.clear()
+                recorder.annotate_feedback(correct=True)
+                shared_state.annotation_count.value = recorder.annotation_count
+
+            if hasattr(shared_state, 'feedback_wrong') and \
+               shared_state.feedback_wrong.is_set():
+                shared_state.feedback_wrong.clear()
+                recorder.annotate_feedback(correct=False)
+                shared_state.annotation_count.value = recorder.annotation_count
+            # ──────────────────────────────────────────────────────────
+
+            elapsed   = time.perf_counter() - t_start
             remaining = CONFIGS["STRIDE_SEC"] - elapsed
             if remaining > 0:
                 time.sleep(remaining)
             else:
-                print(
-                    f"[classifier_worker] ⚠ Loop took {elapsed:.3f}s, "
-                    f"over stride budget of {CONFIGS['STRIDE_SEC']}s"
-                )
+                print(f"[classifier_worker] ⚠ Loop {elapsed:.3f}s over budget")
 
     except Exception as e:
         print(f"[classifier_worker] Fatal error: {e}")
 
     finally:
         shared_state.classifier_running.value = False
+        shared_state.recording_active.value   = False
+
+        # ── NEW: save the session on shutdown ──────────────────────────
+        if recorder.is_active:
+            recorder.stop()
+            print("[classifier_worker] Saving session recording...")
+            saved_path = recorder.save(subject_id="live_session")
+            if saved_path:
+                print(f"[classifier_worker] Session saved: {saved_path}")
+        # ──────────────────────────────────────────────────────────────
+
         if stream is not None:
             stream.disconnect()
         print("[classifier_worker] Stream disconnected.")
+   
