@@ -115,11 +115,11 @@ def lidar_worker(shared_state):
             s = window_min(local_buffer, 180)
             w = window_min(local_buffer, 270)
             filled = sum(1 for v in local_buffer if v > 0.0)
-            print(
-                f"[LIDAR] pts={filled:3d} | "
-                f"N:{n:5.0f}mm  E:{e:5.0f}mm  S:{s:5.0f}mm  W:{w:5.0f}mm"
-                + ("  OBSTACLE" if collision_imminent else "")
-            )
+            # print(
+            #     f"[LIDAR] pts={filled:3d} | "
+            #     f"N:{n:5.0f}mm  E:{e:5.0f}mm  S:{s:5.0f}mm  W:{w:5.0f}mm"
+            #     + ("  OBSTACLE" if collision_imminent else "")
+            # )
 
     except Exception as e:
         print(f"[lidar_worker] Fatal error: {e}")

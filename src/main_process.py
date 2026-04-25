@@ -12,7 +12,6 @@ from workers.pathcam_worker import pathcam_worker
 from workers.pathfinding_worker import pathfinding_worker
 from workers.vlm_worker import vlm_worker
 from workers.lidar_worker import lidar_worker
-
 import multiprocessing as mp
 
 
@@ -70,4 +69,3 @@ def main():
 if __name__ == "__main__":
     mp.set_start_method("spawn")  # important for crossplatform safety
     main()
-

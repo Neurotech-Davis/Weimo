@@ -14,7 +14,9 @@ Right panel sections:
 
 import time
 import cv2
+import math
 import numpy as np
+from collections import deque
 from PyQt6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -29,6 +31,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QButtonGroup,
     QRadioButton,
+    QSizePolicy,
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QImage, QPixmap
@@ -56,9 +59,26 @@ TURN_ZONES_RIGHT = [
     (0.75, 1.0, 90),  # bottom right → 90° CW
 ]
 
+# LIDAR minimap constants
+MINIMAP_RADIUS = 80  # px — radius of the polar plot circle
+MINIMAP_MARGIN = 12  # px — gap from frame edge
+MINIMAP_MAX_DIST = 2000.0  # mm — distance that maps to the outer ring
+MINIMAP_RINGS = 3  # number of range rings to draw
+MINIMAP_ALPHA = 0.55  # overlay transparency (0=invisible, 1=opaque)
+
+# distance thresholds for point colouring (mm)
+MINIMAP_RED_THRESH = 500
+MINIMAP_YELLOW_THRESH = 1200
+
 
 class MainWindow(QMainWindow):
-    def __init__(self, shared_state, mock_classifier=False, mixed_classifier=False, demo_classifier=False):
+    def __init__(
+        self,
+        shared_state,
+        mock_classifier=False,
+        mixed_classifier=False,
+        demo_classifier=False,
+    ):
         super().__init__()
         self.shared_state = shared_state
         self.mock_classifier = mock_classifier
@@ -71,6 +91,8 @@ class MainWindow(QMainWindow):
 
         self._zone_dwell_start = None
         self._zone_active_deg = None
+
+        self._lidar_history: deque = deque(maxlen=5)
 
         self._build_ui()
 
@@ -132,7 +154,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._build_pathfinding_group())
 
         if self.demo_classifier:
-            layout.addWidget(self._build_classifier_group())   # live readout
+            layout.addWidget(self._build_classifier_group())  # live readout
             layout.addWidget(self._build_demo_classifier_group())
         elif self.mock_classifier:
             layout.addWidget(self._build_mock_classifier_group())
@@ -142,7 +164,7 @@ class MainWindow(QMainWindow):
         else:
             layout.addWidget(self._build_classifier_group())
 
-        layout.addStretch()
+        layout.addWidget(self._build_lidar_minimap_widget())
         return layout
 
     # --- Worker status ---
@@ -402,7 +424,9 @@ def _build_classifier_group(self) -> QGroupBox:
 
         self._btn_demo_idle = QPushButton("IDLE")
         self._btn_demo_idle.setToolTip(". key")
-        self._btn_demo_idle.setStyleSheet("background: #555555; color: white; padding: 6px;")
+        self._btn_demo_idle.setStyleSheet(
+            "background: #555555; color: white; padding: 6px;"
+        )
         self._btn_demo_idle.clicked.connect(self._demo_idle)
         self._btn_demo_idle.setEnabled(False)
 
@@ -515,7 +539,9 @@ def _build_classifier_group(self) -> QGroupBox:
 
         self._vlm_label = QLabel("VLM: Waiting...")
         self._vlm_label.setWordWrap(True)
-        self._vlm_label.setStyleSheet("font-family: monospace; font-size: 11px; color: #aaa;")
+        self._vlm_label.setStyleSheet(
+            "font-family: monospace; font-size: 11px; color: #aaa;"
+        )
         layout.addWidget(self._vlm_label)
 
         self._angle_dist_label = QLabel("→ --°  |  --mm")
@@ -527,15 +553,28 @@ def _build_classifier_group(self) -> QGroupBox:
 
         return box
 
+    # -- LIDAR group --
+    def _build_lidar_minimap_widget(self) -> QLabel:
+        self._minimap_label = QLabel()
+        self._minimap_label.setMinimumSize(160, 160)
+        self._minimap_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        self._minimap_label.setStyleSheet("background: #111; border: 1px solid #333;")
+        self._minimap_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        return self._minimap_label
+
     # ------------------------------------------------------------------
     # Tick
     # ------------------------------------------------------------------
     def _tick(self):
+        self._snapshot_lidar()
         self._update_feed()
         self._update_gaze_readout()
         self._update_worker_status()
         self._update_motor_readout()
         self._update_pathfinding_readout()
+        self._update_lidar_minimap()
         if not self.mock_classifier:
             self._update_classifier_readout()
         gaze_x, gaze_y = self.shared_state.get_gaze()
@@ -592,6 +631,126 @@ def _build_classifier_group(self) -> QGroupBox:
             )
 
         return frame
+
+    def _snapshot_lidar(self):
+        """Copy the current shared lidar_distances into the rolling history."""
+        if not self.shared_state.lidar_running.value:
+            return
+        self._lidar_history.append(list(self.shared_state.lidar_distances[:]))
+
+    def _update_lidar_minimap(self):
+        """Render the latest lidar snapshot onto the Qt minimap label."""
+        if not self._lidar_history:
+            return
+        size = self._minimap_label.size()
+        w, h = size.width(), size.height()
+        canvas = np.zeros((h, w, 3), dtype=np.uint8)
+        self._draw_lidar_minimap(canvas, w // 2, h // 2, min(w, h) // 2 - 8)
+        rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
+        qimg = QImage(
+            rgb.data, w, h, w * 3, QImage.Format.Format_RGB888
+        ).copy()  # use copy to prevent pointer degredation
+
+        self._minimap_label.setPixmap(QPixmap.fromImage(qimg))
+
+    def _draw_lidar_minimap(self, canvas: np.ndarray, cx: int, cy: int, r: int):
+        """
+        Draw a polar LIDAR map onto canvas (BGR, in-place).
+        cx, cy : centre pixel of the minimap circle
+        r      : radius in pixels
+        """
+        if not self._lidar_history:
+            return
+        latest = self._lidar_history[-1]
+
+        # background disc
+        cv2.circle(canvas, (cx, cy), r, (20, 20, 20), -1)
+        cv2.circle(canvas, (cx, cy), r, (60, 60, 60), 1)
+
+        # range rings + outermost distance label
+        for ring in range(1, MINIMAP_RINGS + 1):
+            ring_r = int(r * ring / MINIMAP_RINGS)
+            cv2.circle(canvas, (cx, cy), ring_r, (45, 45, 45), 1)
+        cv2.putText(
+            canvas,
+            f"{int(MINIMAP_MAX_DIST / 1000)}m",
+            (cx + r - 18, cy - 3),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.28,
+            (70, 70, 70),
+            1,
+        )
+
+        # front-cone highlight (345-15 deg)
+        obstacle = self.shared_state.obstacle_detected.value
+        cone_fill = (0, 0, 60) if obstacle else (0, 40, 80)
+        cone_border = (0, 0, 200) if obstacle else (0, 100, 200)
+
+        cone_pts = [(cx, cy)]
+        for deg in range(345, 376):  # 345-375 wraps to cover 345-15
+            angle_rad = math.radians((deg % 360) - 90)
+            cone_pts.append(
+                (
+                    int(cx + r * math.cos(angle_rad)),
+                    int(cy + r * math.sin(angle_rad)),
+                )
+            )
+        cv2.fillPoly(canvas, [np.array(cone_pts, dtype=np.int32)], cone_fill)
+        cv2.ellipse(canvas, (cx, cy), (r, r), 90, -15, 15, cone_border, 1)
+
+        # scan points — distance-coloured with history gradation
+        for i, scan in enumerate(self._lidar_history):
+            # Scale intensity from dim (oldest) to bright (newest)
+            intensity = (i + 1) / len(self._lidar_history)
+
+            for deg, dist in enumerate(scan):
+                if dist <= 0.0:
+                    continue
+                plot_r = int(r * min(dist, MINIMAP_MAX_DIST) / MINIMAP_MAX_DIST)
+                angle_rad = math.radians(deg - 90)  # 0 deg = up (forward)
+                px = int(cx + plot_r * math.cos(angle_rad))
+                py = int(cy + plot_r * math.sin(angle_rad))
+
+                # Multiply base BGR values by intensity for alpha-like fade
+                if dist < MINIMAP_RED_THRESH:
+                    color = (0, 0, int(220 * intensity))  # red
+                elif dist < MINIMAP_YELLOW_THRESH:
+                    color = (0, int(200 * intensity), int(220 * intensity))  # yellow
+                else:
+                    color = (0, int(200 * intensity), int(80 * intensity))  # green
+
+                cv2.circle(canvas, (px, py), 2, color, -1)
+
+        # vehicle centre dot
+        cv2.circle(canvas, (cx, cy), 3, (255, 255, 255), -1)
+
+        # obstacle alert glyph inside cone
+        if obstacle:
+            cv2.putText(
+                canvas,
+                "!",
+                (cx - 4, cy - r // 3),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 0, 255),
+                2,
+            )
+
+        # closest front reading printed at bottom of circle
+        front_idx = list(range(345, 360)) + list(range(0, 16))
+        front_dists = [latest[i] for i in front_idx if latest[i] > 0.0]
+        if front_dists:
+            closest = min(front_dists)
+            color_c = (0, 0, 220) if closest < MINIMAP_RED_THRESH else (180, 180, 180)
+            cv2.putText(
+                canvas,
+                f"{int(closest)}mm",
+                (cx - 22, cy + r - 4),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.32,
+                color_c,
+                1,
+            )
 
     def _render_eyetracker_feed(self):
         if not self.shared_state.eye_frame_ready.is_set():
@@ -723,18 +882,18 @@ def _build_classifier_group(self) -> QGroupBox:
         obs = self.shared_state.obstacle_detected.value
         self._angle_dist_label.setText(f"→ {angle:+.1f}°  |  {dist:.0f}mm")
         self._obstacle_label.setText(f"Obstacle: {'⚠ YES' if obs else 'clear'}")
-        
-        verdict = self.shared_state.vlm_last_verdict.value.decode('utf-8')
+
+        verdict = self.shared_state.vlm_last_verdict.value.decode("utf-8")
         if verdict:
             self._vlm_label.setText(f"VLM: {verdict}")
             if "OBSTACLE" in verdict.upper():
                 self._vlm_label.setStyleSheet("color: #ff4444; font-weight: bold;")
             else:
                 self._vlm_label.setStyleSheet("color: #00cc66;")
-        
+
         if self.shared_state.vlm_is_busy.value:
             self._vlm_label.setText("VLM: Analyzing path...")
-            
+
     def _check_turn_zones(self, gaze_x: float, gaze_y: float):
         """Check if gaze is dwelling in a turn zone."""
         if gaze_x < 0 or gaze_y < 0:
