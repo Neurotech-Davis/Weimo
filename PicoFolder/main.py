@@ -158,6 +158,9 @@ def drive_distance(target_meters):
     current_speed = 0
     loop_count = 0
 
+    timeout_ms = max(3000, int(abs(target_meters) * 7000))
+    start_time = time.ticks_ms()
+
     direction = 1 if target_meters >= 0 else -1
     print(
         f"Driving {target_meters}m (target={target_ticks:.0f} ticks, multiplier={current_multiplier})..."
@@ -216,6 +219,9 @@ def turn_robot(degrees):
     accel_rate = 50
     current_speed = 0
     loop_count = 0
+
+    timeout_ms = max(3000, int(abs(degrees) * 50))
+    start_time = time.ticks_ms()
 
     print(
         f"Turning {degrees} degrees (target={target_ticks:.0f} ticks, multiplier={current_multiplier})..."
