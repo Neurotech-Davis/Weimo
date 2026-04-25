@@ -41,6 +41,13 @@ YAW_OFFSET = 0
 BUILTIN_CAMERA_INDEX = 0
 
 
+def get_correct_matrices(index):
+    # returns K, K_new, dist
+    if index == BUILTIN_CAMERA_INDEX:
+        return cam_matrix_builtin, cam_matrix_new_builtin, dist_builtin
+    return cam_matrix_usb, cam_matrix_new_usb, dist_usb
+
+
 def eyetracker_worker(shared_state):
     # SETUP
     shared_state.tracker_running.value = True
@@ -53,107 +60,118 @@ def eyetracker_worker(shared_state):
         num_faces=1,
     )
     landmarker = FaceLandmarker.create_from_options(options)
-    CAMERA_INDEX = shared_state.camera_index.value
+    CAM_BACKEND = cv2.CAP_V4L2 if shared_state.on_linux else cv2.CAP_MSMF
+    CAMERA_INDEX = shared_state.eye_camera_index.value
 
     prev_x, prev_y = 0, 0
 
     def open_camera(index):
-        cap = cv2.VideoCapture(index, cv2.CAP_MSMF)
-        if index == BUILTIN_CAMERA_INDEX:
-            K, K_new, dist = cam_matrix_builtin, cam_matrix_new_builtin, dist_builtin
-        else:
-            K, K_new, dist = cam_matrix_usb, cam_matrix_new_usb, dist_usb
-        return cap, K, K_new, dist
+        cap = cv2.VideoCapture(index, CAM_BACKEND)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        K, K_new, dist = get_correct_matrices(index)
 
-    cap, K, K_new, dist = open_camera(CAMERA_INDEX)
+        W, H = shared_state.EYE_FRAME_W, shared_state.EYE_FRAME_H
+        map1, map2 = cv2.initUndistortRectifyMap(
+            K, dist, None, K_new, (W, H), cv2.CV_32FC1
+        )
+        return cap, map1, map2, K_new
+
+    cap, map1, map2, K_new = open_camera(CAMERA_INDEX)
 
     # LOOP
-    while not shared_state.shutdown.is_set():
-        # hot-swap camera if UI changed the index
-        new_index = shared_state.camera_index.value
-        if new_index != CAMERA_INDEX:
-            cap.release()
-            CAMERA_INDEX = new_index
-            cap, K, K_new, dist = open_camera(CAMERA_INDEX)
+    try:
+        while not shared_state.shutdown.is_set():
+            # hot-swap camera if UI changed the index
+            new_index = shared_state.eye_camera_index.value
+            if new_index != CAMERA_INDEX:
+                cap.release()
+                CAMERA_INDEX = new_index
+                cap, map1, map2, K_new = open_camera(CAMERA_INDEX)
 
-        SMOOTHING = shared_state.smoothing_factor.value
+            SMOOTHING = shared_state.smoothing_factor.value
 
-        success, frame = cap.read()
-        if not success:
-            # print("[eyetracker_worker] Error reading from camera")
-            time.sleep(1)
-            continue
+            success, frame = cap.read()
+            if not success:
+                # print("[eyetracker_worker] Error reading from camera")
+                time.sleep(1)
+                continue
 
-        frame = cv2.undistort(frame, K, dist, None, K_new)
-        h, w, _ = frame.shape
-        rgb_frame = mp.Image(
-            image_format=mp.ImageFormat.SRGB,
-            data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
-        )
-        timestamp_ms = int(time.time() * 1000)
-        detection_result = landmarker.detect_for_video(rgb_frame, timestamp_ms)
-
-        if detection_result.face_landmarks:
-            landmarks = detection_result.face_landmarks[0]
-
-            # ... your existing processing unchanged ...
-            # 1. Extract 2D Image Points from landmarks
-            image_points = np.array(
-                [
-                    (landmarks[1].x * w, landmarks[1].y * h),
-                    (landmarks[199].x * w, landmarks[199].y * h),
-                    (landmarks[33].x * w, landmarks[33].y * h),
-                    (landmarks[263].x * w, landmarks[263].y * h),
-                    (landmarks[61].x * w, landmarks[61].y * h),
-                    (landmarks[291].x * w, landmarks[291].y * h),
-                ],
-                dtype="double",
+            undistorted_frame = cv2.remap(frame, map1, map2, cv2.INTER_LINEAR)
+            h, w, _ = undistorted_frame.shape
+            rgb_frame = mp.Image(
+                image_format=mp.ImageFormat.SRGB,
+                data=cv2.cvtColor(undistorted_frame, cv2.COLOR_BGR2RGB),
             )
+            timestamp_ms = int(time.time() * 1000)
+            detection_result = landmarker.detect_for_video(rgb_frame, timestamp_ms)
 
-            # 2. Estimate Head Pose (PnP)
-            # focal_length = w
-            # cam_matrix = np.array(
-            #     [[focal_length, 0, w / 2], [0, focal_length, h / 2], [0, 0, 1]],
-            #     dtype="double",
-            # )
+            if detection_result.face_landmarks:
+                landmarks = detection_result.face_landmarks[0]
 
-            # success_flag, rot_vec, trans_vec
-            _, rot_vec, _ = cv2.solvePnP(model_points, image_points, K_new, None)
+                # ... your existing processing unchanged ...
+                # 1. Extract 2D Image Points from landmarks
+                image_points = np.array(
+                    [
+                        (landmarks[1].x * w, landmarks[1].y * h),
+                        (landmarks[199].x * w, landmarks[199].y * h),
+                        (landmarks[33].x * w, landmarks[33].y * h),
+                        (landmarks[263].x * w, landmarks[263].y * h),
+                        (landmarks[61].x * w, landmarks[61].y * h),
+                        (landmarks[291].x * w, landmarks[291].y * h),
+                    ],
+                    dtype="double",
+                )
 
-            # 3. Get Rotation Angles (Degrees)
-            rmat, _ = cv2.Rodrigues(rot_vec)
-            angles, _, _, _, _, _ = cv2.RQDecomp3x3(rmat)
-            pitch, yaw = angles[0], angles[1]
+                # 2. Estimate Head Pose (PnP)
+                # focal_length = w
+                # cam_matrix = np.array(
+                #     [[focal_length, 0, w / 2], [0, focal_length, h / 2], [0, 0, 1]],
+                #     dtype="double",
+                # )
 
-            # Normalize pitch
-            # Center is large by default (180/-180 degrees). Need to recenter for sensible math.
-            pitch = pitch - 180 if pitch > 0 else pitch + 180
+                # success_flag, rot_vec, trans_vec
+                _, rot_vec, _ = cv2.solvePnP(model_points, image_points, K_new, None)
 
-            # 4. Map Rotation to Normalised Coordinates (0.0 - 1.0)
-            target_x = 0.5 + (yaw - YAW_OFFSET) / (SENSITIVITY_X)
-            target_y = 0.5 + (pitch - PITCH_OFFSET) / (SENSITIVITY_Y)
+                # 3. Get Rotation Angles (Degrees)
+                rmat, _ = cv2.Rodrigues(rot_vec)
+                angles, _, _, _, _, _ = cv2.RQDecomp3x3(rmat)
+                pitch, yaw = angles[0], angles[1]
 
-            # 5. Exponential Moving Average Smoothing
-            curr_x = prev_x + (target_x - prev_x) * SMOOTHING
-            curr_y = prev_y + (target_y - prev_y) * SMOOTHING
+                # Normalize pitch
+                # Center is large by default (180/-180 degrees). Need to recenter for sensible math.
+                pitch = pitch - 180 if pitch > 0 else pitch + 180
 
-            # 6. CLAMPING: keep within 0.0 - 1.0
-            final_x = float(np.clip(curr_x, 0.0, 1.0))
-            final_y = float(np.clip(curr_y, 0.0, 1.0))
+                # 4. Map Rotation to Normalised Coordinates (0.0 - 1.0)
+                target_x = 0.5 + (yaw - YAW_OFFSET) / (SENSITIVITY_X)
+                target_y = 0.5 + (pitch - PITCH_OFFSET) / (SENSITIVITY_Y)
 
-            shared_state.set_gaze(final_x, final_y)
-            shared_state.face_detected.value = True
-            prev_x, prev_y = final_x, final_y
-        else:
-            shared_state.face_detected.value = False
-            shared_state.set_gaze(-1.0, -1.0)
+                # 5. Exponential Moving Average Smoothing
+                curr_x = prev_x + (target_x - prev_x) * SMOOTHING
+                curr_y = prev_y + (target_y - prev_y) * SMOOTHING
 
-        with shared_state.frame_buffer.get_lock():
-            buf = np.frombuffer(shared_state.frame_buffer.get_obj(), dtype=np.uint8)
-            buf[:] = frame.flatten()
-        shared_state.frame_ready.set()
+                # 6. CLAMPING: keep within 0.0 - 1.0
+                final_x = float(np.clip(curr_x, 0.0, 1.0))
+                final_y = float(np.clip(curr_y, 0.0, 1.0))
+
+                shared_state.set_gaze(final_x, final_y)
+                shared_state.face_detected.value = True
+                prev_x, prev_y = final_x, final_y
+            else:
+                shared_state.face_detected.value = False
+                shared_state.set_gaze(-1.0, -1.0)
+
+            with shared_state.eye_frame_buffer.get_lock():
+                buf = np.frombuffer(
+                    shared_state.eye_frame_buffer.get_obj(), dtype=np.uint8
+                )
+                buf[:] = undistorted_frame.flatten()
+            shared_state.eye_frame_ready.set()
 
     # TEARDOWN
-    shared_state.tracker_running.value = False
-    cap.release()
-    landmarker.close()
+    except Exception as e:
+        print(f"[eyetracker_worker] Fatal error: {e}")
+    finally:
+        shared_state.tracker_running.value = False
+        cap.release()
+        landmarker.close()

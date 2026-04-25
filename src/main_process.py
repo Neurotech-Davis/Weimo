@@ -8,6 +8,7 @@ from workers.eyetracker_worker import eyetracker_worker
 from workers.classifier_worker import classifier_worker
 from workers.eeg_recorder_worker import eeg_recorder_worker
 from workers.motor_worker import motor_worker
+from workers.pathcam_worker import pathcam_worker
 from workers.pathfinding_worker import pathfinding_worker
 
 import multiprocessing as mp
@@ -22,6 +23,7 @@ def main():
 
     # Daemon=true means they are killed when parent dies. This is desired UNLESS they have important cleanup in their "finally" block, like the motor worker which wants to shut off the car.
     p_tracker = mp.Process(target=eyetracker_worker, args=(shared_state,), daemon=True)
+    p_pathcam = mp.Process(target=pathcam_worker, args=(shared_state,), daemon=True)
     p_classifier = mp.Process(
         target=classifier_worker, args=(shared_state,), daemon=True
     )
@@ -33,7 +35,7 @@ def main():
 
     # process_arr = [p_tracker]
     # process_arr = [p_tracker, p_pathfinding]
-    process_arr = [p_tracker, p_pathfinding, p_motor]
+    process_arr = [p_tracker, p_pathfinding, p_motor, p_pathcam]
     if record_eeg:
         process_arr.append(p_recorder)
 

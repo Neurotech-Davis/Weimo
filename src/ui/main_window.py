@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QSlider,
     QSpinBox,
+    QGridLayout,
     QGroupBox,
     QCheckBox,
     QPushButton,
@@ -67,8 +68,6 @@ class MainWindow(QMainWindow):
         self.mirrored = True
         self._active_feed = FEED_EYETRACKER
 
-        self._path_cap = None
-        self._current_path_idx = None
         self._zone_dwell_start = None
         self._zone_active_deg = None
 
@@ -145,14 +144,32 @@ class MainWindow(QMainWindow):
     # --- Worker status ---
 
     def _build_status_group(self) -> QGroupBox:
-        box, layout = self._make_hgroup("Worker Status")
+        box = QGroupBox("Worker Status")
+        # Use QGridLayout for the 3x2 requirement
+        layout = QGridLayout(box)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setHorizontalSpacing(10)
+        layout.setVerticalSpacing(4)
+
+        workers = [
+            "eyetracker",
+            "pathfinding",
+            "classifier",
+            "motor",
+            "pathcam",
+            "lidar",
+        ]
 
         self._status_labels = {}
-        for name in ("eyetracker", "pathfinding", "classifier", "motor"):
-            label = QLabel(f"● {name[:3]}")
+        for i, name in enumerate(workers):
+            label = QLabel(f"● {name[:4]}")  # Increased prefix to 4 for clarity
             label.setStyleSheet("color: #555; font-family: monospace; font-size: 11px;")
             self._status_labels[name] = label
-            layout.addWidget(label)
+
+            # Grid math: 3 columns, 2 rows
+            row = i // 3
+            col = i % 3
+            layout.addWidget(label, row, col)
 
         return box
 
@@ -210,7 +227,7 @@ class MainWindow(QMainWindow):
         cam_row.addWidget(QLabel("Eye:"))
         self._cam_spin = QSpinBox()
         self._cam_spin.setRange(0, 100)
-        self._cam_spin.setValue(self.shared_state.camera_index.value)
+        self._cam_spin.setValue(self.shared_state.eye_camera_index.value)
         self._cam_spin.setFixedWidth(75)
         self._cam_spin.valueChanged.connect(self._on_eyetracker_cam_changed)
         cam_row.addWidget(self._cam_spin)
@@ -220,7 +237,7 @@ class MainWindow(QMainWindow):
         cam_row.addWidget(QLabel("Path:"))
         self._path_cam_spin = QSpinBox()
         self._path_cam_spin.setRange(0, 100)
-        self._path_cam_spin.setValue(self.shared_state.pathfinding_camera_index.value)
+        self._path_cam_spin.setValue(self.shared_state.pathcam_index.value)
         self._path_cam_spin.setFixedWidth(75)
         self._path_cam_spin.valueChanged.connect(self._on_pathfinding_cam_changed)
         cam_row.addWidget(self._path_cam_spin)
@@ -372,9 +389,6 @@ class MainWindow(QMainWindow):
 
     def _update_feed(self):
         if self._active_feed == FEED_EYETRACKER:
-            if self._path_cap is not None:
-                self._path_cap.release()
-                self._path_cap = None
             self._render_eyetracker_feed()
         else:
             self._render_pathfinding_feed()
@@ -425,15 +439,15 @@ class MainWindow(QMainWindow):
         return frame
 
     def _render_eyetracker_feed(self):
-        if not self.shared_state.frame_ready.is_set():
+        if not self.shared_state.eye_frame_ready.is_set():
             return
 
-        with self.shared_state.frame_buffer.get_lock():
+        with self.shared_state.eye_frame_buffer.get_lock():
             buf = np.frombuffer(
-                self.shared_state.frame_buffer.get_obj(), dtype=np.uint8
+                self.shared_state.eye_frame_buffer.get_obj(), dtype=np.uint8
             )
             frame = buf.reshape(
-                (self.shared_state.FRAME_H, self.shared_state.FRAME_W, 3)
+                (self.shared_state.EYE_FRAME_H, self.shared_state.EYE_FRAME_W, 3)
             ).copy()
 
         if self.mirrored:
@@ -452,30 +466,18 @@ class MainWindow(QMainWindow):
         self._display_frame(frame)
 
     def _render_pathfinding_feed(self):
-        idx = self.shared_state.pathfinding_camera_index.value
-        if self._path_cap is None or idx != self._current_path_idx:
-            if self._path_cap is not None:
-                self._path_cap.release()
-            self._path_cap = cv2.VideoCapture(idx, cv2.CAP_MSMF)
-            self._current_path_idx = idx
+        if not self.shared_state.path_frame_ready.is_set():
+            return
 
-        ret, frame = self._path_cap.read()
-        if not ret:
-            h, w = self.shared_state.FRAME_H, self.shared_state.FRAME_W
-            frame = np.zeros((h, w, 3), dtype=np.uint8)
-            text = f"Cam {idx} Offline"
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            text_size = cv2.getTextSize(text, font, 1, 2)[0]
-            cv2.putText(
-                frame,
-                text,
-                ((w - text_size[0]) // 2, (h + text_size[1]) // 2),
-                font,
-                1,
-                (100, 100, 100),
-                2,
+        with self.shared_state.path_frame_buffer.get_lock():
+            buf = np.frombuffer(
+                self.shared_state.path_frame_buffer.get_obj(), dtype=np.uint8
             )
-        elif self.mirrored:
+            frame = buf.reshape(
+                (self.shared_state.PATH_FRAME_H, self.shared_state.PATH_FRAME_W, 3)
+            ).copy()
+
+        if self.mirrored:
             frame = cv2.flip(frame, 1)
 
         gaze_x, gaze_y = self.shared_state.get_gaze()
@@ -516,6 +518,8 @@ class MainWindow(QMainWindow):
             "pathfinding": self.shared_state.pathfinding_running.value,
             "classifier": self.shared_state.classifier_running.value,
             "motor": self.shared_state.motor_running.value,
+            "pathcam": self.shared_state.pathcam_running.value,
+            "lidar": False,  # self.shared_state.lidar_running.value,
         }
         for name, label in self._status_labels.items():
             running = status_map.get(name, False)
@@ -615,10 +619,10 @@ class MainWindow(QMainWindow):
         self._feed_label.setText(f"Switching to {feed} feed...")
 
     def _on_eyetracker_cam_changed(self, value: int):
-        self.shared_state.camera_index.value = value
+        self.shared_state.eye_camera_index.value = value
 
     def _on_pathfinding_cam_changed(self, value: int):
-        self.shared_state.pathfinding_camera_index.value = value
+        self.shared_state.pathcam_index.value = value
 
     def _on_smoothing_changed(self, value: int):
         factor = value / 100.0
@@ -634,7 +638,5 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._timer.stop()
-        if self._path_cap is not None:
-            self._path_cap.release()
         self.shared_state.shutdown.set()
         event.accept()

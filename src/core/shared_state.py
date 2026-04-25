@@ -7,6 +7,7 @@ class SharedState:
     FRAME_W = 640
     FRAME_H = 480
     usb_is_main_cam = "--usb-main" in sys.argv
+    on_linux = "--linux" in sys.argv
 
     def __init__(self):
         # global, defines termination
@@ -21,16 +22,31 @@ class SharedState:
         self.face_detected = mp.Value(ctypes.c_bool, False)
         self.tracker_running = mp.Value(ctypes.c_bool, False)
 
-        FRAME_W, FRAME_H = 640, 480
-        self.frame_buffer = mp.Array(ctypes.c_uint8, FRAME_W * FRAME_H * 3)
-        self.frame_ready = mp.Event()
+        self.EYE_FRAME_W = 640
+        self.EYE_FRAME_H = 480
+        self.eye_frame_buffer = mp.Array(
+            ctypes.c_uint8, self.EYE_FRAME_W * self.EYE_FRAME_H * 3
+        )
+        self.eye_frame_ready = mp.Event()
 
         # eyetracker params (UI -> eyetracker)
         if self.usb_is_main_cam:
-            self.camera_index = mp.Value(ctypes.c_int, 64)
+            self.eye_camera_index = mp.Value(ctypes.c_int, 64)
         else:
-            self.camera_index = mp.Value(ctypes.c_int, 1)
+            self.eye_camera_index = mp.Value(ctypes.c_int, 1)
         self.smoothing_factor = mp.Value(ctypes.c_float, 0.5)
+
+        # ---------------------
+        # Pathfinding cam worker
+        # ---------------------
+        self.pathcam_running = mp.Value(ctypes.c_bool, False)
+        self.PATH_FRAME_W = 640
+        self.PATH_FRAME_H = 480
+        self.path_frame_buffer = mp.Array(
+            ctypes.c_uint8, self.PATH_FRAME_W * self.PATH_FRAME_H * 3
+        )
+        self.path_frame_ready = mp.Event()
+        self.pathcam_index = mp.Value(ctypes.c_int, 0)
 
         ### -----------
         ### Classifier
