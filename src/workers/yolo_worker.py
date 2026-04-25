@@ -1,3 +1,4 @@
+import cv2
 from pathlib import Path
 
 import numpy as np
@@ -115,3 +116,59 @@ def yolo_worker(shared_state):
         # TEARDOWN
         # 3. TEARDOWN — release hardware, close connections
         shared_state.yolo_running.value = False
+
+
+if __name__ == "__main__":
+    W, H = 640, 480
+    MOUNT_HEIGHT_TEST = 300.0   # mm — adjust to match your setup
+    MOUNT_ANGLE_TEST  = 30.0    # degrees downward — adjust to match your setup
+
+    K         = _load_K("built-in")
+    path_mask = _build_path_mask(W, H, K, MOUNT_HEIGHT_TEST, MOUNT_ANGLE_TEST)
+    model     = YOLO(MODEL_NAME)
+
+    # Precompute a green overlay of the danger zone for visualisation
+    mask_overlay = np.zeros((H, W, 3), dtype=np.uint8)
+    mask_overlay[path_mask == 1] = (0, 255, 0)
+
+    cap = cv2.VideoCapture(0)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, W)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, H)
+
+    print("Running — press Q to quit")
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+
+        results = model(frame, verbose=False)[0]
+
+        obstacle = False
+        for box in results.boxes:
+            x1, y1, x2, y2 = (int(v) for v in box.xyxy[0].tolist())
+            in_path = path_mask[y1:y2, x1:x2].any()
+            if in_path:
+                obstacle = True
+
+            # red box = in path, blue box = outside path
+            colour = (0, 0, 255) if in_path else (255, 0, 0)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
+            label = results.names[int(box.cls)]
+            cv2.putText(frame, label, (x1, y1 - 6),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, colour, 1)
+
+        # blend danger zone overlay onto frame
+        frame = cv2.addWeighted(frame, 1.0, mask_overlay, 0.3, 0)
+
+        status      = "OBSTACLE" if obstacle else "clear"
+        status_col  = (0, 0, 255) if obstacle else (0, 255, 0)
+        cv2.putText(frame, status, (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, status_col, 2)
+
+        print(f"[yolo_worker] {status}")
+        cv2.imshow("yolo_worker test", frame)
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
