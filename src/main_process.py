@@ -18,8 +18,10 @@ def main():
     record_eeg = "--record-eeg" in sys.argv
     mock_classifier = "--mock-classifier" in sys.argv
     mixed_classifier = "--mixed-classifier" in sys.argv
+    demo_classifier = "--demo-classifier" in sys.argv
     shared_state = SharedState()  # all shared mem in one place
     shared_state.mock_classifier.value = mock_classifier
+    shared_state.demo_classifier.value = demo_classifier
 
     # Daemon=true means they are killed when parent dies. This is desired UNLESS they have important cleanup in their "finally" block, like the motor worker which wants to shut off the car.
     p_tracker = mp.Process(target=eyetracker_worker, args=(shared_state,), daemon=True)
@@ -48,7 +50,8 @@ def main():
 
     app = QApplication(sys.argv)
     window = MainWindow(
-        shared_state, mock_classifier=mock_classifier, mixed_classifier=mixed_classifier
+        shared_state, mock_classifier=mock_classifier, mixed_classifier=mixed_classifier,
+        demo_classifier=demo_classifier
     )
     window.show()
     app.exec()

@@ -58,11 +58,12 @@ TURN_ZONES_RIGHT = [
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, shared_state, mock_classifier=False, mixed_classifier=False):
+    def __init__(self, shared_state, mock_classifier=False, mixed_classifier=False, demo_classifier=False):
         super().__init__()
         self.shared_state = shared_state
         self.mock_classifier = mock_classifier
         self.mixed_classifier = mixed_classifier
+        self.demo_classifier = demo_classifier
         self.setWindowTitle("Weimo")
         self.resize(1100, 650)
         self.mirrored = True
@@ -130,7 +131,10 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._build_motor_group())
         layout.addWidget(self._build_pathfinding_group())
 
-        if self.mock_classifier:
+        if self.demo_classifier:
+            layout.addWidget(self._build_classifier_group())   # live readout
+            layout.addWidget(self._build_demo_classifier_group())
+        elif self.mock_classifier:
             layout.addWidget(self._build_mock_classifier_group())
         elif self.mixed_classifier:
             layout.addWidget(self._build_classifier_group())  # live readout
@@ -145,7 +149,6 @@ class MainWindow(QMainWindow):
 
     def _build_status_group(self) -> QGroupBox:
         box = QGroupBox("Worker Status")
-        # Use QGridLayout for the 3x2 requirement
         layout = QGridLayout(box)
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setHorizontalSpacing(10)
@@ -162,11 +165,10 @@ class MainWindow(QMainWindow):
 
         self._status_labels = {}
         for i, name in enumerate(workers):
-            label = QLabel(f"● {name[:4]}")  # Increased prefix to 4 for clarity
+            label = QLabel(f"● {name[:4]}")
             label.setStyleSheet("color: #555; font-family: monospace; font-size: 11px;")
             self._status_labels[name] = label
 
-            # Grid math: 3 columns, 2 rows
             row = i // 3
             col = i % 3
             layout.addWidget(label, row, col)
@@ -197,7 +199,6 @@ class MainWindow(QMainWindow):
         self._mirror_check.setChecked(True)
         self._mirror_check.toggled.connect(lambda v: setattr(self, "mirrored", v))
 
-        # put all three on one row
         row = QHBoxLayout()
         row.addWidget(self._radio_eyetracker)
         row.addWidget(self._radio_pathfinding)
@@ -222,7 +223,6 @@ class MainWindow(QMainWindow):
     def _build_eyetracker_controls_group(self) -> QGroupBox:
         box, layout = self._make_group("Eyetracker")
 
-        # row 1: both camera spinners on same line
         cam_row = QHBoxLayout()
         cam_row.addWidget(QLabel("Eye:"))
         self._cam_spin = QSpinBox()
@@ -244,7 +244,6 @@ class MainWindow(QMainWindow):
         cam_row.addStretch()
         layout.addLayout(cam_row)
 
-        # row 2: smoothing slider
         smooth_row = QHBoxLayout()
         smooth_row.addWidget(QLabel("Smooth:"))
         self._smooth_slider = QSlider(Qt.Orientation.Horizontal)
@@ -329,6 +328,119 @@ class MainWindow(QMainWindow):
         self._mock_state_label.setStyleSheet(
             f"font-family: monospace; font-size: 12px; font-weight: bold; color: {color};"
         )
+
+    # --- Demo classifier ---
+
+    def _build_demo_classifier_group(self) -> QGroupBox:
+        box, layout = self._make_group("Demo Classifier")
+        box.setStyleSheet("QGroupBox { color: #5599ff; font-weight: bold; }")
+
+        self._demo_mode_btn = QPushButton("EEG ACTIVE  [m to override]")
+        self._demo_mode_btn.setCheckable(True)
+        self._demo_mode_btn.setChecked(False)
+        self._demo_mode_btn.setStyleSheet(
+            "background: #1a472a; color: #00cc66; font-weight: bold; "
+            "padding: 6px; border: 1px solid #00cc66;"
+        )
+        self._demo_mode_btn.clicked.connect(self._toggle_demo_override)
+        layout.addWidget(self._demo_mode_btn)
+
+        self._demo_state_label = QLabel("Current: IDLE")
+        self._demo_state_label.setStyleSheet(
+            "font-family: monospace; font-size: 12px; color: #888888;"
+        )
+        layout.addWidget(self._demo_state_label)
+
+        btn_row = QHBoxLayout()
+
+        self._btn_demo_move = QPushButton("MOVE")
+        self._btn_demo_move.setToolTip(", key")
+        self._btn_demo_move.setStyleSheet(
+            "background: #00cc66; color: white; font-weight: bold; padding: 6px;"
+        )
+        self._btn_demo_move.clicked.connect(self._demo_move)
+        self._btn_demo_move.setEnabled(False)
+
+        self._btn_demo_idle = QPushButton("IDLE")
+        self._btn_demo_idle.setToolTip(". key")
+        self._btn_demo_idle.setStyleSheet("background: #555555; color: white; padding: 6px;")
+        self._btn_demo_idle.clicked.connect(self._demo_idle)
+        self._btn_demo_idle.setEnabled(False)
+
+        self._btn_demo_jaw = QPushButton("JAW")
+        self._btn_demo_jaw.setToolTip("/ key")
+        self._btn_demo_jaw.setStyleSheet(
+            "background: #cc8800; color: white; font-weight: bold; padding: 6px;"
+        )
+        self._btn_demo_jaw.clicked.connect(self._demo_jaw_clench)
+        self._btn_demo_jaw.setEnabled(False)
+
+        btn_row.addWidget(self._btn_demo_move)
+        btn_row.addWidget(self._btn_demo_idle)
+        btn_row.addWidget(self._btn_demo_jaw)
+        layout.addLayout(btn_row)
+
+        hint = QLabel(", move  |  . idle  |  / jaw clench  |  m toggle")
+        hint.setStyleSheet("font-size: 10px; color: #666; font-family: monospace;")
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(hint)
+
+        return box
+
+    def _toggle_demo_override(self):
+        override = self._demo_mode_btn.isChecked()
+        self.shared_state.demo_override.value = override
+        if override:
+            self._demo_mode_btn.setText("SAFETY KEYS ACTIVE  [m for EEG]")
+            self._demo_mode_btn.setStyleSheet(
+                "background: #472a1a; color: #cc8800; font-weight: bold; "
+                "padding: 6px; border: 1px solid #cc8800;"
+            )
+        else:
+            self._demo_mode_btn.setText("EEG ACTIVE  [m to override]")
+            self._demo_mode_btn.setStyleSheet(
+                "background: #1a472a; color: #00cc66; font-weight: bold; "
+                "padding: 6px; border: 1px solid #00cc66;"
+            )
+        for btn in (self._btn_demo_move, self._btn_demo_idle, self._btn_demo_jaw):
+            btn.setEnabled(override)
+
+    def _demo_move(self):
+        self.shared_state.prediction.value = 1
+        self.shared_state.pred_confidence.value = 1.0
+        self._update_demo_state_label(1)
+
+    def _demo_jaw_clench(self):
+        self.shared_state.prediction.value = 2
+        self.shared_state.pred_confidence.value = 1.0
+        self._update_demo_state_label(2)
+
+    def _demo_idle(self):
+        self.shared_state.prediction.value = 0
+        self.shared_state.pred_confidence.value = 1.0
+        self._update_demo_state_label(0)
+
+    def _update_demo_state_label(self, pred: int):
+        name, color = MOCK_STATE_STYLES.get(pred, ("?", "#fff"))
+        self._demo_state_label.setText(f"Current: {name}")
+        self._demo_state_label.setStyleSheet(
+            f"font-family: monospace; font-size: 12px; font-weight: bold; color: {color};"
+        )
+
+    def keyPressEvent(self, event):
+        if self.demo_classifier:
+            key = event.key()
+            if key == Qt.Key.Key_M:
+                self._demo_mode_btn.setChecked(not self._demo_mode_btn.isChecked())
+                self._toggle_demo_override()
+            elif self.shared_state.demo_override.value:
+                if key == Qt.Key.Key_Comma:
+                    self._demo_move()
+                elif key == Qt.Key.Key_Period:
+                    self._demo_idle()
+                elif key == Qt.Key.Key_Slash:
+                    self._demo_jaw_clench()
+        super().keyPressEvent(event)
 
     # --- Motor controls ---
 

@@ -55,7 +55,10 @@ class SharedState:
         self.classifier_running = mp.Value(ctypes.c_bool, False)
         self.prediction = mp.Value(ctypes.c_int, -1)
         self.pred_confidence = mp.Value(ctypes.c_float, -1.0)
-        self.mock_classifier = mp.Value(ctypes.c_bool, False)  # set by main_process
+        self.mock_classifier = mp.Value(ctypes.c_bool, False)   # set by main_process
+        self.demo_classifier = mp.Value(ctypes.c_bool, False)   # set by main_process
+        # When True, classifier_worker skips writing predictions (demo keyboard takes over)
+        self.demo_override = mp.Value(ctypes.c_bool, False)
 
         # classifier params (UI -> classifier)
         # does it need to pass anything?

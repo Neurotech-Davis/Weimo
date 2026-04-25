@@ -298,8 +298,12 @@ def classifier_worker(shared_state):
                 f"  →  {final_label}"
             )
 
-            shared_state.prediction.value    = final_pred
-            shared_state.pred_confidence.value = float(dl_conf if final_pred == 1 else svm_conf)
+            if not shared_state.demo_override.value:
+                shared_state.prediction.value = final_pred
+                shared_state.pred_confidence.value = float(
+                    dl_conf if final_pred == 1 else svm_conf
+                )
+            # else: demo keyboard has control — don't overwrite
 
             elapsed = time.perf_counter() - t_start
             remaining = CONFIGS["STRIDE_SEC"] - elapsed
