@@ -1,9 +1,26 @@
 """
 Motor imagery BCI calibration: collect EEG trials, preprocess, fine-tune DeepConvNet.
 
-Usage:
-  python ml_model/MI_calibration.py
-  python ml_model/MI_calibration.py --n-move 15 --n-idle 15 --unfreeze-blocks 1 --train-epochs 30 --lr 5e-4
+Usage
+-----
+  python ml_model/MI_calibration.py [options]
+
+Arguments
+---------
+  --n-move N            Number of MI trials (idle epochs collected from ITIs to match). Default: 10.
+  --unfreeze-blocks N   Layers to retrain: 0=classifier only, 1=+block4, 2=+block3,
+                        3=+block2, 4=all. Default: 0.
+  --train-epochs N      Fine-tuning epochs. Default: 20.
+  --lr F                Learning rate. Default: 1e-3.
+  --mock-stream         Run paradigm with fake EEG — no headset needed.
+  --fullscreen          Open pygame window in fullscreen mode.
+  --skip-collection     Skip paradigm and go straight to preprocessing + fine-tuning.
+  --fif-path PATH       FIF file to use (required with --skip-collection).
+
+Examples
+--------
+  python ml_model/MI_calibration.py --mock-stream
+  python ml_model/MI_calibration.py --n-move 20 --unfreeze-blocks 1 --train-epochs 30
   python ml_model/MI_calibration.py --skip-collection --fif-path data_collection/calibration_fifs/xxx.fif
 """
 
@@ -37,8 +54,7 @@ from processing.preprocess_pipeline import MNEPipeline, epoch, epoch_filter, ext
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 CH_NAMES = [
-    "EEG LE-Pz", "EEG F4-Pz", "EEG C4-Pz", "EEG P4-Pz",
-    "EEG P3-Pz", "EEG C3-Pz", "EEG F3-Pz", "Pz",
+    'Pz', 'F4', 'C4', 'P4', 'P3', 'C3', 'F3', 'TRG'
 ]
 EXCLUDE      = {"Trigger", "Event"}
 STREAM_NAME  = "WS-default"
@@ -383,8 +399,9 @@ def run_finetuning(X: np.ndarray, y: np.ndarray, args) -> str:
             print(f"  Epoch {ep_idx+1:3d}/{args.train_epochs}  loss={avg_loss:.4f}  acc={acc:.3f}")
 
     os.makedirs(CALIBRATED_DIR, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    save_path = os.path.join(CALIBRATED_DIR, f"{timestamp}_calibrated.pt")
+    depth_name = UNFREEZE_GROUPS[args.unfreeze_blocks] if args.unfreeze_blocks < len(UNFREEZE_GROUPS) else "all"
+    n_trials   = len(X_t)
+    save_path  = os.path.join(CALIBRATED_DIR, f"{depth_name}_{n_trials}trials_calibrated.pt")
     torch.save(model.state_dict(), save_path)
     print(f"[Phase 3] Saved calibrated model → {save_path}")
     return save_path
