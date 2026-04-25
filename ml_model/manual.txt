@@ -1,0 +1,16 @@
+From root:
+1)
+```
+cd src/workers
+python mock_lsl_test.py
+# you can change file it streams
+# by default it starts halfway thru
+```
+
+2) 
+```
+cd src/
+python main_process.py
+# args: --mock-classifier
+```
+
