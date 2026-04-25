@@ -2,9 +2,9 @@
 Motor imagery BCI calibration: collect EEG trials, preprocess, fine-tune DeepConvNet.
 
 Usage:
-  python ml_model/ml_calibration.py
-  python ml_model/ml_calibration.py --n-move 15 --n-idle 15 --unfreeze-blocks 1 --train-epochs 30 --lr 5e-4
-  python ml_model/ml_calibration.py --skip-collection --fif-path data_collection/calibration_fifs/xxx.fif
+  python ml_model/MI_calibration.py
+  python ml_model/MI_calibration.py --n-move 15 --n-idle 15 --unfreeze-blocks 1 --train-epochs 30 --lr 5e-4
+  python ml_model/MI_calibration.py --skip-collection --fif-path data_collection/calibration_fifs/xxx.fif
 """
 
 import os
@@ -12,10 +12,10 @@ import sys
 import time
 import random
 import argparse
-import tty
-import termios
 import warnings
 from datetime import datetime
+
+import pygame
 
 import numpy as np
 import torch
@@ -45,6 +45,8 @@ STREAM_NAME  = "WS-default"
 SFREQ        = 300
 TRIAL_DUR    = 4.0   # seconds pulled from stream per trial (full cue window)
 EPOCH_TMAX   = 3.0   # tmax for MNE epoching; extra 1s is FIR filter edge buffer
+ITI_MIN      = 4.0   # min random inter-trial interval (seconds) — idle epoch pulled here
+ITI_MAX      = 7.0   # max random inter-trial interval
 
 MODEL_PATH     = os.path.join(ROOT, "src", "models", "DeepConvNet_per_epoch.pt")
 FIF_DIR        = os.path.join(ROOT, "data_collection", "calibration_fifs")
@@ -68,9 +70,7 @@ UNFREEZE_GROUPS = [
 def parse_args():
     p = argparse.ArgumentParser(description="EEG motor imagery calibration")
     p.add_argument("--n-move",          type=int,   default=10,
-                   help="Number of MOVE trials (default: 10)")
-    p.add_argument("--n-idle",          type=int,   default=10,
-                   help="Number of REST/idle trials (default: 10)")
+                   help="Number of MOVE trials (default: 10); idle count matches automatically")
     p.add_argument("--unfreeze-blocks", type=int,   default=0, choices=range(5),
                    help="Blocks to unfreeze: 0=classifier only … 4=all (default: 0)")
     p.add_argument("--train-epochs",    type=int,   default=20,
@@ -81,25 +81,68 @@ def parse_args():
                    help="Skip data collection; use --fif-path instead")
     p.add_argument("--fif-path",        type=str,   default=None,
                    help="Path to existing .fif file (requires --skip-collection)")
+    p.add_argument("--mock-stream",     action="store_true",
+                   help="Run paradigm with fake EEG data — no LSL connection needed")
+    p.add_argument("--fullscreen",      action="store_true",
+                   help="Run pygame window in fullscreen mode")
     return p.parse_args()
 
 
-# ── Keyboard ──────────────────────────────────────────────────────────────────
+# ── Pygame display ────────────────────────────────────────────────────────────
 
-def wait_for_space_or_quit():
-    """Block until SPACE is pressed; raise KeyboardInterrupt on Q or Ctrl-C."""
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
-    try:
-        tty.setraw(fd)
-        while True:
-            ch = sys.stdin.read(1)
-            if ch == " ":
-                break
-            if ch.lower() == "q" or ch == "\x03":
+_BG     = (20,  20,  20)
+_WHITE  = (255, 255, 255)
+_YELLOW = (255, 220,  50)
+_CYAN   = (100, 200, 255)
+_GRAY   = (140, 140, 140)
+
+
+def _render(screen, lines: list):
+    """Draw centered text lines. Each entry: (text, size, color, y_offset)."""
+    screen.fill(_BG)
+    cx = screen.get_width()  // 2
+    cy = screen.get_height() // 2
+    for text, size, color, y_off in lines:
+        font = pygame.font.Font(None, size)
+        surf = font.render(text, True, color)
+        screen.blit(surf, surf.get_rect(center=(cx, cy + y_off)))
+    pygame.display.flip()
+
+
+def _pump(raise_on_quit: bool = True):
+    """Process pending pygame events; raise KeyboardInterrupt on Q/Escape/close."""
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            raise KeyboardInterrupt
+        if event.type == pygame.KEYDOWN and raise_on_quit:
+            if event.key in (pygame.K_q, pygame.K_ESCAPE):
                 raise KeyboardInterrupt
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+def _sleep_events(seconds: float):
+    """Sleep for `seconds` while keeping the event queue drained."""
+    end = time.perf_counter() + seconds
+    while time.perf_counter() < end:
+        _pump()
+        pygame.time.wait(20)
+
+
+def _wait_for_space(screen):
+    """Show a 'Press SPACE' prompt and block until SPACE is pressed."""
+    _render(screen, [
+        ("Press SPACE to continue", 36, _GRAY, 160),
+        ("(Q / Esc to abort)",      28, _GRAY, 200),
+    ])
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                raise KeyboardInterrupt
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE:
+                    return
+                if event.key in (pygame.K_q, pygame.K_ESCAPE):
+                    raise KeyboardInterrupt
+        pygame.time.wait(20)
 
 
 # ── LSL ───────────────────────────────────────────────────────────────────────
@@ -121,61 +164,93 @@ def attempt_lsl_connection(max_retries: int = 10, retry_delay: int = 2):
 
 def run_collection(args) -> "str | None":
     """Collect cued EEG trials via LSL, assemble a FIF with annotations."""
-    stream = attempt_lsl_connection()
-    if stream is None:
-        print("[calibration] Could not connect — is dsi2lsl running?")
-        return None
+    if args.mock_stream:
+        stream    = None
+        sfreq     = float(SFREQ)
+        eeg_picks = CH_NAMES
+        print("[calibration] MOCK MODE — no LSL connection, fake data will be used\n")
+    else:
+        stream = attempt_lsl_connection()
+        if stream is None:
+            print("[calibration] Could not connect — is dsi2lsl running?")
+            return None
 
-    all_ch    = stream.info["ch_names"]
-    sfreq     = stream.info["sfreq"]
-    eeg_picks = [ch for ch in all_ch if ch not in EXCLUDE]
+        all_ch    = stream.info["ch_names"]
+        sfreq     = stream.info["sfreq"]
+        eeg_picks = [ch for ch in all_ch if ch not in EXCLUDE]
 
-    if eeg_picks != CH_NAMES:
-        stream.disconnect()
-        raise RuntimeError(
-            f"Channel order mismatch.\n  Expected: {CH_NAMES}\n  Got:      {eeg_picks}"
-        )
+        if eeg_picks != CH_NAMES:
+            stream.disconnect()
+            raise RuntimeError(
+                f"Channel order mismatch.\n  Expected: {CH_NAMES}\n  Got:      {eeg_picks}"
+            )
 
-    trial_order = ["move"] * args.n_move + ["idle"] * args.n_idle
-    random.shuffle(trial_order)
-    n_total   = len(trial_order)
+    n_total    = args.n_move
     trial_data = []   # list of (label, np.ndarray shape (8, n_samples))
 
-    print(f"\n[calibration] Starting collection: {args.n_move} move + {args.n_idle} idle trials")
-    print("[calibration] During each trial: fixation (4s) → READY (1.5s) → cue (4s)")
-    print("[calibration] Press Q at any time to abort early.\n")
+    pygame.init()
+    flags  = pygame.FULLSCREEN if args.fullscreen else 0
+    screen = pygame.display.set_mode((900, 600), flags)
+    pygame.display.set_caption("MI Calibration")
+    pygame.mouse.set_visible(False)
+
+    print(f"[calibration] Starting: {n_total} move trials (idle collected from ITIs)")
 
     try:
-        for i, label in enumerate(trial_order):
-            cue_text = "IMAGINE MOVING" if label == "move" else "REST"
+        for i in range(n_total):
+            counter = f"Trial {i+1} / {n_total}"
 
-            # Fixation
-            print(f"--- Trial {i+1}/{n_total}  [{label.upper()}] ---")
-            print("  +")
-            time.sleep(4.0)
+            # Fixation cross
+            _render(screen, [
+                (counter, 28, _GRAY,  -220),
+                ("+",    120, _WHITE,     0),
+            ])
+            _sleep_events(4.0)
 
             # Ready
-            print("  READY")
-            time.sleep(1.5)
+            _render(screen, [
+                (counter, 28, _GRAY,  -220),
+                ("READY", 80, _WHITE,     0),
+            ])
+            _sleep_events(1.5)
 
             # Cue — EEG window
-            print(f"\n  *** {cue_text} ***\n")
-            time.sleep(TRIAL_DUR)
+            _render(screen, [
+                (counter,          28, _GRAY,    -220),
+                ("IMAGINE MOVING", 88, _WHITE,      0),
+            ])
+            _sleep_events(TRIAL_DUR)
 
-            # Pull data immediately after cue ends (last TRIAL_DUR seconds = cue window)
-            data, _ = stream.get_data(winsize=TRIAL_DUR, picks=eeg_picks)
-            trial_data.append((label, data.copy()))
+            # Pull move epoch immediately after cue ends
+            if stream is not None:
+                data, _ = stream.get_data(winsize=TRIAL_DUR, picks=eeg_picks)
+            else:
+                data = np.random.randn(len(eeg_picks), int(TRIAL_DUR * sfreq))
+            trial_data.append(("move", data.copy()))
 
-            # Advance prompt
-            print("  Press SPACE to continue  (Q to quit)")
-            wait_for_space_or_quit()
-            print()
+            # Random ITI — blank screen, silently collect idle epoch at the end
+            iti = random.uniform(ITI_MIN, ITI_MAX)
+            _render(screen, [])   # blank
+            _sleep_events(iti)
+
+            if stream is not None:
+                idle_data, _ = stream.get_data(winsize=TRIAL_DUR, picks=eeg_picks)
+            else:
+                idle_data = np.random.randn(len(eeg_picks), int(TRIAL_DUR * sfreq))
+            trial_data.append(("idle", idle_data.copy()))
+
+            # Press space to start next trial (skip prompt on last trial)
+            if i < n_total - 1:
+                _wait_for_space(screen)
 
     except KeyboardInterrupt:
-        print(f"\n[calibration] Aborted after {len(trial_data)} trials.")
+        print(f"\n[calibration] Aborted after {sum(1 for l,_ in trial_data if l=='move')} move trials.")
 
     finally:
-        stream.disconnect()
+        if stream is not None:
+            stream.disconnect()
+        pygame.mouse.set_visible(True)
+        pygame.quit()
 
     if len(trial_data) < 4:
         print(f"[calibration] Only {len(trial_data)} trials collected — need at least 4. Aborting.")
@@ -322,7 +397,7 @@ def main():
 
     print("=" * 60)
     print("  EEG Motor Imagery Calibration")
-    print(f"  Trials:          {args.n_move} move + {args.n_idle} idle")
+    print(f"  Trials:          {args.n_move} move + {args.n_move} idle (from ITIs)")
     print(f"  Unfreeze blocks: {args.unfreeze_blocks}  "
           f"({'classifier only' if args.unfreeze_blocks == 0 else 'see UNFREEZE_GROUPS'})")
     print(f"  Train epochs:    {args.train_epochs}  lr={args.lr}")
