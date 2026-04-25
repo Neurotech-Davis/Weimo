@@ -55,8 +55,8 @@ class SharedState:
         self.classifier_running = mp.Value(ctypes.c_bool, False)
         self.prediction = mp.Value(ctypes.c_int, -1)
         self.pred_confidence = mp.Value(ctypes.c_float, -1.0)
-        self.mock_classifier = mp.Value(ctypes.c_bool, False)   # set by main_process
-        self.demo_classifier = mp.Value(ctypes.c_bool, False)   # set by main_process
+        self.mock_classifier = mp.Value(ctypes.c_bool, False)  # set by main_process
+        self.demo_classifier = mp.Value(ctypes.c_bool, False)  # set by main_process
         # When True, classifier_worker skips writing predictions (demo keyboard takes over)
         self.demo_override = mp.Value(ctypes.c_bool, False)
 
@@ -87,14 +87,14 @@ class SharedState:
         self.pathfinding_running = mp.Value(ctypes.c_bool, False)
         self.pathfinding_error = mp.Event()
 
-        # Pathfinding -> Motor (lidar guard)
-        self.obstacle_detected = mp.Value(ctypes.c_bool, False)
-        self.lidar_dist = mp.Value(ctypes.c_float, float("inf"))
-
         ### -----------
         ### LIDAR
         ### -----------
         self.lidar_running = mp.Value(ctypes.c_bool, False)
+        # LIDAR -> Motor
+        self.obstacle_detected = mp.Value(ctypes.c_bool, False)
+        self.lidar_dist = mp.Value(ctypes.c_float, float("inf"))
+        self.lidar_distances = mp.Array(ctypes.c_float, 360)
 
         ### -----------
         ### VLM Safety
@@ -111,3 +111,4 @@ class SharedState:
     def set_gaze(self, x: float, y: float):
         self.gaze_x.value = x
         self.gaze_y.value = y
+

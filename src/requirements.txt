@@ -22,3 +22,6 @@ pyautogui # unecessary for final product but currently is used
 
 ### for lidar
 rplidar-roboticia
+
+### for vlm
+dotenv

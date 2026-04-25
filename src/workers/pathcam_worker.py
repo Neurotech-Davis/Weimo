@@ -56,7 +56,7 @@ def pathcam_worker(shared_state):
 
             success, frame = cap.read()
             if not success:
-                print("[pathcam_worker] Error reading from camera")
+                # print("[pathcam_worker] Error reading from camera")
                 time.sleep(1)
                 continue
 

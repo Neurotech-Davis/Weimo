@@ -6,8 +6,8 @@ from rplidar import RPLidar, RPLidarException
 # Screen setup
 WIDTH, HEIGHT = 800, 800
 CENTER = (WIDTH // 2, HEIGHT // 2)
-MIN_DISTANCE = 50     # mm (5 cm)
-MAX_DISTANCE = 2000   # mm (300 cm)
+MIN_DISTANCE = 50  # mm (5 cm)
+MAX_DISTANCE = 2000  # mm (300 cm)
 SCALE = (WIDTH // 2) / MAX_DISTANCE
 
 # Colors
@@ -17,6 +17,7 @@ YELLOW = (255, 255, 0)
 RED = (255, 0, 0)
 DARK_GREEN = (0, 100, 0)
 WHITE = (255, 255, 255)
+
 
 def polar_to_cartesian(angle_deg, distance_mm):
     OFFSET_DEGREES = 90
@@ -28,6 +29,7 @@ def polar_to_cartesian(angle_deg, distance_mm):
     y = CENTER[1] - int(r * math.sin(angle_rad))
     return x, y
 
+
 def lidar_graphing():
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -38,7 +40,8 @@ def lidar_graphing():
     font_title = pygame.font.SysFont(None, 28, bold=True)
 
     # The following is all according to documentation
-    PORT = "COM3"
+    # PORT = "COM3"
+    PORT = "/dev/ttyUSB0"
     BAUD = 115200
     lidar = RPLidar(PORT, baudrate=BAUD, timeout=1)
     lidar.start_motor()
@@ -56,10 +59,10 @@ def lidar_graphing():
             scan_history.append(filtered_scan)
             if len(scan_history) > 2:
                 scan_history.pop(0)
-            
+
             for event in pygame.event.get():
-                    if event.type == pygame.QUIT:
-                        running = False
+                if event.type == pygame.QUIT:
+                    running = False
             if not running:
                 break
 
@@ -68,23 +71,24 @@ def lidar_graphing():
             for saved_scan in scan_history:
                 for quality, ang, dist in saved_scan:
                     px, py = polar_to_cartesian(ang, dist)
-                    if dist <= 1000:    # Within 1 meter
+                    if dist <= 1000:  # Within 1 meter
                         color = RED
                     elif dist <= 2000:  # Within 2 meters
                         color = YELLOW
                     else:
                         color = GREEN
-                    pygame.draw.circle(screen, color, (px,py), 2)
-
+                    pygame.draw.circle(screen, color, (px, py), 2)
 
             for r in range(500, MAX_DISTANCE + 1, 500):
                 pygame.draw.circle(screen, DARK_GREEN, CENTER, int(r * SCALE), 1)
                 label = font_small.render(f"{r // 10} cm", True, WHITE)
                 screen.blit(label, (CENTER[0] + int(r * SCALE) - 25, CENTER[1]))
-                
 
             title_surface = font_title.render("Lidar Graphing", True, WHITE)
-            screen.blit(title_surface, (WIDTH // 2 - title_surface.get_width() // 2, HEIGHT - 40))
+            screen.blit(
+                title_surface,
+                (WIDTH // 2 - title_surface.get_width() // 2, HEIGHT - 40),
+            )
 
             pygame.display.flip()
             clock.tick(30)
@@ -113,5 +117,7 @@ def lidar_graphing():
 
         pygame.quit()
 
+
 if __name__ == "__main__":
     lidar_graphing()
+

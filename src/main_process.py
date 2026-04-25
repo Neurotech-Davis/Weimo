@@ -11,6 +11,7 @@ from workers.motor_worker import motor_worker
 from workers.pathcam_worker import pathcam_worker
 from workers.pathfinding_worker import pathfinding_worker
 from workers.vlm_worker import vlm_worker
+from workers.lidar_worker import lidar_worker
 
 import multiprocessing as mp
 
@@ -36,12 +37,11 @@ def main():
         target=pathfinding_worker, args=(shared_state,), daemon=True
     )
     p_vlm = mp.Process(target=vlm_worker, args=(shared_state,), daemon=True)
+    p_lidar = mp.Process(target=lidar_worker, args=(shared_state,))
 
     # process_arr = [p_tracker]
-    # process_arr = [p_tracker, p_pathfinding]
-    # process_arr = [p_tracker, p_pathfinding, p_motor, p_pathcam]
-    
-    process_arr = [p_tracker, p_pathfinding, p_motor, p_pathcam, p_vlm]
+    # process_arr = [p_tracker, p_pathfinding, p_motor, p_pathcam, p_vlm, p_lidar]
+    process_arr = [p_tracker, p_pathfinding, p_motor, p_pathcam, p_lidar]
     if record_eeg:
         process_arr.append(p_recorder)
 
@@ -54,8 +54,10 @@ def main():
 
     app = QApplication(sys.argv)
     window = MainWindow(
-        shared_state, mock_classifier=mock_classifier, mixed_classifier=mixed_classifier,
-        demo_classifier=demo_classifier
+        shared_state,
+        mock_classifier=mock_classifier,
+        mixed_classifier=mixed_classifier,
+        demo_classifier=demo_classifier,
     )
     window.show()
     app.exec()
@@ -68,3 +70,4 @@ def main():
 if __name__ == "__main__":
     mp.set_start_method("spawn")  # important for crossplatform safety
     main()
+
