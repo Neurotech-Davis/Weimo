@@ -10,6 +10,7 @@ from workers.eeg_recorder_worker import eeg_recorder_worker
 from workers.motor_worker import motor_worker
 from workers.pathcam_worker import pathcam_worker
 from workers.pathfinding_worker import pathfinding_worker
+from workers.vlm_worker import vlm_worker
 
 import multiprocessing as mp
 
@@ -34,10 +35,13 @@ def main():
     p_pathfinding = mp.Process(
         target=pathfinding_worker, args=(shared_state,), daemon=True
     )
+    p_vlm = mp.Process(target=vlm_worker, args=(shared_state,), daemon=True)
 
     # process_arr = [p_tracker]
     # process_arr = [p_tracker, p_pathfinding]
-    process_arr = [p_tracker, p_pathfinding, p_motor, p_pathcam]
+    # process_arr = [p_tracker, p_pathfinding, p_motor, p_pathcam]
+    
+    process_arr = [p_tracker, p_pathfinding, p_motor, p_pathcam, p_vlm]
     if record_eeg:
         process_arr.append(p_recorder)
 

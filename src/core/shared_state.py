@@ -96,6 +96,15 @@ class SharedState:
         ### -----------
         self.lidar_running = mp.Value(ctypes.c_bool, False)
 
+        ### -----------
+        ### VLM Safety
+        ### -----------
+        self.vlm_running = mp.Value(ctypes.c_bool, False)
+        self.vlm_last_verdict = mp.Array(ctypes.c_char, 255) # Store response string
+        self.vlm_is_busy = mp.Value(ctypes.c_bool, False)
+        # To avoid double-triggering the same move
+        self.vlm_processed_dist = mp.Value(ctypes.c_float, 0.0)
+        
     def get_gaze(self) -> tuple:
         return self.gaze_x.value, self.gaze_y.value
 

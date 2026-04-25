@@ -474,6 +474,11 @@ class MainWindow(QMainWindow):
     def _build_pathfinding_group(self) -> QGroupBox:
         box, layout = self._make_group("Pathfinding")
 
+        self._vlm_label = QLabel("VLM: Waiting...")
+        self._vlm_label.setWordWrap(True)
+        self._vlm_label.setStyleSheet("font-family: monospace; font-size: 11px; color: #aaa;")
+        layout.addWidget(self._vlm_label)
+
         self._angle_dist_label = QLabel("→ --°  |  --mm")
         self._obstacle_label = QLabel("Obstacle: --")
 
@@ -680,7 +685,18 @@ class MainWindow(QMainWindow):
         obs = self.shared_state.obstacle_detected.value
         self._angle_dist_label.setText(f"→ {angle:+.1f}°  |  {dist:.0f}mm")
         self._obstacle_label.setText(f"Obstacle: {'⚠ YES' if obs else 'clear'}")
-
+        
+        verdict = self.shared_state.vlm_last_verdict.value.decode('utf-8')
+        if verdict:
+            self._vlm_label.setText(f"VLM: {verdict}")
+            if "OBSTACLE" in verdict.upper():
+                self._vlm_label.setStyleSheet("color: #ff4444; font-weight: bold;")
+            else:
+                self._vlm_label.setStyleSheet("color: #00cc66;")
+        
+        if self.shared_state.vlm_is_busy.value:
+            self._vlm_label.setText("VLM: Analyzing path...")
+            
     def _check_turn_zones(self, gaze_x: float, gaze_y: float):
         """Check if gaze is dwelling in a turn zone."""
         if gaze_x < 0 or gaze_y < 0:
