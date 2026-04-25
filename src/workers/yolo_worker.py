@@ -7,8 +7,8 @@ from ultralytics import YOLO
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 MODEL_NAME          = "yolov8n.pt"   # cheapest YOLO — detection only, no segmentation needed
-MAX_DIST_MM         = 1500           # ignore objects further than this
-TRACK_HALF_WIDTH_MM = 350            # half the buggy's physical track width
+MAX_DIST_MM         = 200           # ignore objects further than this
+TRACK_HALF_WIDTH_MM = 180            # half the buggy's physical track width
 
 _MATRICES_DIR = Path(__file__).parent.parent.parent / "pathfinding" / "calibration" / "matrices"
 
