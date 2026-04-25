@@ -1,46 +1,45 @@
 from rplidar import RPLidar, RPLidarException
-import serial
 import time
 
 PORT = "COM3"
 BAUD = 115200
-#BAUD = 256000
+# BAUD = 256000  # try this if 115200 fails
+
 lidar = RPLidar(PORT, baudrate=BAUD, timeout=1)
 
 try:
-    lidar.start_motor() # starts motor
-    time.sleep(0.2) # sleep for .2 seconds to warm up motor
+    lidar.start_motor()
+    time.sleep(1.0)
 
-    # iter_scans() gets a one full 360 sweep 
-    for idx, scan in enumerate(lidar.iter_scans(max_buf_meas=100, min_len=5)):
-        # max_buf_meas limits the measurements to 100 to prevent overflow
-        # min_len=5 discards any sweep with less than 5 valid points
-        # scan is a tuple of (quality, angle, distance)
-        if idx == 0:
-            print('index 0')
-            s = scan
-            break
-    print(scan)
-    '''
-    n=0
-    for new_scan, quality, angle, distance in lidar.iter_measures(max_buf_meas=500):
-        if new_scan:
-            print('---NEW SCAN---')
-        print(f"Quality: {quality}\tAngle: {angle}\tDistance: {distance}")
-        n+=1
-        if n >20:
-            break
-    '''
+    print("Reading one full scan...\n")
+
+    for scan_index, scan in enumerate(lidar.iter_scans(max_buf_meas=2000, min_len=100)):
+        print(f"Scan {scan_index}")
+        print(f"Number of points: {len(scan)}\n")
+
+        for quality, angle, distance in scan:
+            print(f"Quality: {quality}\tAngle: {angle:.2f}\tDistance: {distance:.2f} mm")
+
+        break  # only print one scan
+
 except RPLidarException as e:
     print("RPLidarException:", e)
+
+except KeyboardInterrupt:
+    print("\nStopped")
 
 finally:
     try:
         lidar.stop()
     except Exception:
         pass
+
     try:
         lidar.stop_motor()
     except Exception:
         pass
-    lidar.disconnect()
+
+    try:
+        lidar.disconnect()
+    except Exception:
+        pass
