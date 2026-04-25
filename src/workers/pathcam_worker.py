@@ -28,7 +28,7 @@ def pathcam_worker(shared_state):
     # SETUP
     shared_state.pathcam_running.value = True
     CAMERA_INDEX = shared_state.pathcam_index.value
-    CAM_BACKEND = cv2.CAP_V4L2 if shared_state.on_linux else cv2.CAP_MSMF
+    CAM_BACKEND = cv2.CAP_V4L2 if shared_state.on_linux else cv2.CAP_DSHOW
 
     def open_camera(index):
         cap = cv2.VideoCapture(index, CAM_BACKEND)

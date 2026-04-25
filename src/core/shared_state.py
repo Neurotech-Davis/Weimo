@@ -36,9 +36,9 @@ class SharedState:
             self.eye_camera_index = mp.Value(ctypes.c_int, 1)
         self.smoothing_factor = mp.Value(ctypes.c_float, 0.5)
 
-        # ---------------------
-        # Pathfinding cam worker
-        # ---------------------
+        ### ---------------------
+        ### Pathfinding cam worker
+        ### ---------------------
         self.pathcam_running = mp.Value(ctypes.c_bool, False)
         self.PATH_FRAME_W = 640
         self.PATH_FRAME_H = 480
@@ -87,6 +87,11 @@ class SharedState:
         # Pathfinding -> Motor (lidar guard)
         self.obstacle_detected = mp.Value(ctypes.c_bool, False)
         self.lidar_dist = mp.Value(ctypes.c_float, float("inf"))
+
+        ### -----------
+        ### LIDAR
+        ### -----------
+        self.lidar_running = mp.Value(ctypes.c_bool, False)
 
     def get_gaze(self) -> tuple:
         return self.gaze_x.value, self.gaze_y.value

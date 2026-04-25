@@ -60,7 +60,7 @@ def eyetracker_worker(shared_state):
         num_faces=1,
     )
     landmarker = FaceLandmarker.create_from_options(options)
-    CAM_BACKEND = cv2.CAP_V4L2 if shared_state.on_linux else cv2.CAP_MSMF
+    CAM_BACKEND = cv2.CAP_V4L2 if shared_state.on_linux else cv2.CAP_DSHOW
     CAMERA_INDEX = shared_state.eye_camera_index.value
 
     prev_x, prev_y = 0, 0
@@ -93,7 +93,7 @@ def eyetracker_worker(shared_state):
 
             success, frame = cap.read()
             if not success:
-                # print("[eyetracker_worker] Error reading from camera")
+                print("[eyetracker_worker] Error reading from camera")
                 time.sleep(1)
                 continue
 

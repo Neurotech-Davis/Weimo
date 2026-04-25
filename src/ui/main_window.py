@@ -519,7 +519,7 @@ class MainWindow(QMainWindow):
             "classifier": self.shared_state.classifier_running.value,
             "motor": self.shared_state.motor_running.value,
             "pathcam": self.shared_state.pathcam_running.value,
-            "lidar": False,  # self.shared_state.lidar_running.value,
+            "lidar": self.shared_state.lidar_running.value,
         }
         for name, label in self._status_labels.items():
             running = status_map.get(name, False)
