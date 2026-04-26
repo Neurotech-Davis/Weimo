@@ -110,11 +110,7 @@ class NavDebugWindow(QMainWindow):
         self.cam_cfg = CameraConfig(height=90, angle=9.5)
 
         # Initialize hardware
-<<<<<<< Updated upstream
         self.cap = cv2.VideoCapture(0)
-=======
-        self.cap = cv2.VideoCapture(64)
->>>>>>> Stashed changes
         if not self.cap.isOpened():
             print("FATAL ERROR: Could not open /dev/video64.")
             sys.exit(1)

@@ -286,54 +286,54 @@ class MainWindow(QMainWindow):
 
     # Replace _build_classifier_group entirely
 
-def _build_classifier_group(self) -> QGroupBox:
-    box, layout = self._make_group("Classifier")
+    def _build_classifier_group(self) -> QGroupBox:
+        box, layout = self._make_group("Classifier")
 
-    # ── Existing prediction/confidence labels ──────────────────────
-    self._pred_label = QLabel("Prediction: --")
-    self._pred_label.setStyleSheet(
-        "font-family: monospace; font-size: 13px; font-weight: bold;"
-    )
-    layout.addWidget(self._pred_label)
+        # ── Existing prediction/confidence labels ──────────────────────
+        self._pred_label = QLabel("Prediction: --")
+        self._pred_label.setStyleSheet(
+            "font-family: monospace; font-size: 13px; font-weight: bold;"
+        )
+        layout.addWidget(self._pred_label)
 
-    self._conf_label = QLabel("Confidence: --")
-    self._conf_label.setStyleSheet("font-family: monospace; font-size: 12px;")
-    layout.addWidget(self._conf_label)
+        self._conf_label = QLabel("Confidence: --")
+        self._conf_label.setStyleSheet("font-family: monospace; font-size: 12px;")
+        layout.addWidget(self._conf_label)
 
-    # ── NEW: feedback buttons ──────────────────────────────────────
-    feedback_row = QHBoxLayout()
+        # ── NEW: feedback buttons ──────────────────────────────────────
+        feedback_row = QHBoxLayout()
 
-    self._btn_correct = QPushButton("✓ Correct")
-    self._btn_correct.setStyleSheet(
-        "background: #1a6b3a; color: white; font-weight: bold; padding: 4px;"
-    )
-    self._btn_correct.clicked.connect(self._on_feedback_correct)
+        self._btn_correct = QPushButton("✓ Correct")
+        self._btn_correct.setStyleSheet(
+            "background: #1a6b3a; color: white; font-weight: bold; padding: 4px;"
+        )
+        self._btn_correct.clicked.connect(self._on_feedback_correct)
 
-    self._btn_wrong = QPushButton("✗ Wrong")
-    self._btn_wrong.setStyleSheet(
-        "background: #6b1a1a; color: white; font-weight: bold; padding: 4px;"
-    )
-    self._btn_wrong.clicked.connect(self._on_feedback_wrong)
+        self._btn_wrong = QPushButton("✗ Wrong")
+        self._btn_wrong.setStyleSheet(
+            "background: #6b1a1a; color: white; font-weight: bold; padding: 4px;"
+        )
+        self._btn_wrong.clicked.connect(self._on_feedback_wrong)
 
-    feedback_row.addWidget(self._btn_correct)
-    feedback_row.addWidget(self._btn_wrong)
-    layout.addLayout(feedback_row)
+        feedback_row.addWidget(self._btn_correct)
+        feedback_row.addWidget(self._btn_wrong)
+        layout.addLayout(feedback_row)
 
-    # ── NEW: session recording status ─────────────────────────────
-    self._recording_label = QLabel("● Recording: waiting...")
-    self._recording_label.setStyleSheet(
-        "font-family: monospace; font-size: 11px; color: #555;"
-    )
-    layout.addWidget(self._recording_label)
+        # ── NEW: session recording status ─────────────────────────────
+        self._recording_label = QLabel("● Recording: waiting...")
+        self._recording_label.setStyleSheet(
+            "font-family: monospace; font-size: 11px; color: #555;"
+        )
+        layout.addWidget(self._recording_label)
 
-    # ── NEW: annotation counter ───────────────────────────────────
-    self._annotation_label = QLabel("Annotations: 0")
-    self._annotation_label.setStyleSheet(
-        "font-family: monospace; font-size: 11px; color: #888;"
-    )
-    layout.addWidget(self._annotation_label)
+        # ── NEW: annotation counter ───────────────────────────────────
+        self._annotation_label = QLabel("Annotations: 0")
+        self._annotation_label.setStyleSheet(
+            "font-family: monospace; font-size: 11px; color: #888;"
+        )
+        layout.addWidget(self._annotation_label)
 
-    return box
+        return box
 
 
 
