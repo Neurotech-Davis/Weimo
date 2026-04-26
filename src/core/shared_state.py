@@ -70,6 +70,9 @@ class SharedState:
         self.motor_command = mp.Value(ctypes.c_int, 0)  # UI writes intent
         self.target_angle = mp.Value(ctypes.c_float, 0.0)
         self.target_dist = mp.Value(ctypes.c_float, 0.0)
+        # these get frozen as "targets"
+        self.committed_angle = mp.Value(ctypes.c_float, 0.0)
+        self.committed_dist = mp.Value(ctypes.c_float, 0.0)
         # Motor -> UI
         self.motor_state = mp.Value(ctypes.c_int, 0)
         self.motor_running = mp.Value(ctypes.c_bool, False)

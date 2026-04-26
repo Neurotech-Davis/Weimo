@@ -21,6 +21,7 @@ from enum import Enum
 
 
 BAUD_RATE = 115200
+INFINITE_DRIVE_FALLBACK_LENGTH = 1000  # mm
 
 MOVE_CONFIDENCE_THRESHOLD = 0.95
 DIST_THRESHOLD_MM = 150
@@ -55,7 +56,9 @@ def connect(port: str, baud: int, retries: int = 5) -> serial.Serial:
     for attempt in range(1, retries + 1):
         try:
             ser = serial.Serial(port, baud, timeout=2)
-            print(f"[motor_worker] port open on attempt {attempt}, waiting for Pico boot...")
+            print(
+                f"[motor_worker] port open on attempt {attempt}, waiting for Pico boot..."
+            )
             # Drain until we see the ready banner or 4s elapses
             deadline = time.time() + 4.0
             while time.time() < deadline:
@@ -124,7 +127,9 @@ def send(ser, cmd, shared_state=None):
             print(f"[pico] {line}")
 
     # Deadline expired — don't silently return, force reconnect
-    raise serial.SerialTimeoutException(f"send() 30s timeout waiting for ack on: {cmd!r}")
+    raise serial.SerialTimeoutException(
+        f"send() 30s timeout waiting for ack on: {cmd!r}"
+    )
 
 
 def cmd_stop(ser):
@@ -184,7 +189,7 @@ def navigate_to(ser, h_angle: float, dist_mm: float, shared_state) -> bool:
     # step 3 — drive forward
     if not math.isfinite(dist_mm):
         print(f"[motor_worker] dist={dist_mm:.0f}mm is not finite — skipping drive")
-        dist_mm = 700.0  # 1500 / 1000 / ?
+        dist_mm = INFINITE_DRIVE_FALLBACK_LENGTH  # Currently 700. 1500 / 1000 ?
 
     if dist_mm > DIST_THRESHOLD_MM:
         print(f"[motor_worker] driving {dist_mm:.0f}mm")
@@ -218,6 +223,7 @@ def process_ui_turn_logic(ser, shared_state) -> bool:
 
 # ── Worker ────────────────────────────────────────────────────────────────────
 
+
 def motor_worker(shared_state):
     PICO_PORT = "/dev/ttyACM0" if shared_state.on_linux else "COM8"
     ser = None
@@ -242,7 +248,9 @@ def motor_worker(shared_state):
                     manual_cmd = shared_state.motor_command.value
                     if manual_cmd != 0:
                         if state == MotorState.DRIVING:
-                            print("[motor_worker] manual override — aborting navigation")
+                            print(
+                                "[motor_worker] manual override — aborting navigation"
+                            )
                         cmd_stop(ser)
                         state = MotorState.IDLE
                         shared_state.motor_state.value = 0
@@ -278,22 +286,35 @@ def motor_worker(shared_state):
                             if dist > DIST_THRESHOLD_MM:
                                 shared_state.prediction.value = 0
                                 h_angle = shared_state.target_angle.value
+                                frozen_dist = shared_state.target_dist.value
+                                shared_state.committed_angle.value = h_angle
+                                shared_state.committed_dist.value = frozen_dist
 
                                 state = MotorState.DRIVING
                                 shared_state.motor_state.value = 1
                                 print("[motor_worker] IDLE → DRIVING")
-                                arrived = navigate_to(ser, h_angle, dist, shared_state)
+                                arrived = navigate_to(
+                                    ser, h_angle, frozen_dist, shared_state
+                                )
 
                                 state = MotorState.IDLE
                                 shared_state.motor_state.value = 0
-                                print(f"[motor_worker] DRIVING → IDLE  (arrived={arrived})")
+                                print(
+                                    f"[motor_worker] DRIVING → IDLE  (arrived={arrived})"
+                                )
                             else:
-                                print("[motor_worker] target too close, ignoring. Handing off to UI?")
+                                print(
+                                    "[motor_worker] target too close, ignoring. Handing off to UI?"
+                                )
 
                     elapsed = time.perf_counter() - t_start
                     time.sleep(max(0.0, 0.05 - elapsed))
 
-            except (serial.SerialException, serial.SerialTimeoutException, OSError) as e:
+            except (
+                serial.SerialException,
+                serial.SerialTimeoutException,
+                OSError,
+            ) as e:
                 print(f"[motor_worker] serial error: {e} — attempting reconnect in 2s")
                 shared_state.motor_state.value = 0
                 shared_state.turn_command.value = 0.0

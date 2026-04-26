@@ -169,6 +169,16 @@ class MainWindow(QMainWindow):
     # --- Worker status ---
 
     def _build_status_group(self) -> QGroupBox:
+        WORKER_DISPLAY = {
+            "eyetracker": "Eyetrack",
+            "pathfinding": "Pathfind",
+            "classifier": "Classify",
+            "motor": "Motor",
+            "pathcam": "PathCam",
+            "lidar": "LIDAR",
+            "yolo": "YOLO",
+        }
+
         box = QGroupBox("Worker Status")
         layout = QGridLayout(box)
         layout.setContentsMargins(6, 4, 6, 4)
@@ -187,7 +197,7 @@ class MainWindow(QMainWindow):
 
         self._status_labels = {}
         for i, name in enumerate(workers):
-            label = QLabel(f"● {name[:4]}")
+            label = QLabel(f"● {WORKER_DISPLAY.get(name, name)}")
             label.setStyleSheet("color: #555; font-family: monospace; font-size: 11px;")
             self._status_labels[name] = label
 
@@ -300,38 +310,38 @@ class MainWindow(QMainWindow):
         self._conf_label.setStyleSheet("font-family: monospace; font-size: 12px;")
         layout.addWidget(self._conf_label)
 
-        # ── NEW: feedback buttons ──────────────────────────────────────
-        feedback_row = QHBoxLayout()
-
-        self._btn_correct = QPushButton("✓ Correct")
-        self._btn_correct.setStyleSheet(
-            "background: #1a6b3a; color: white; font-weight: bold; padding: 4px;"
-        )
-        self._btn_correct.clicked.connect(self._on_feedback_correct)
-
-        self._btn_wrong = QPushButton("✗ Wrong")
-        self._btn_wrong.setStyleSheet(
-            "background: #6b1a1a; color: white; font-weight: bold; padding: 4px;"
-        )
-        self._btn_wrong.clicked.connect(self._on_feedback_wrong)
-
-        feedback_row.addWidget(self._btn_correct)
-        feedback_row.addWidget(self._btn_wrong)
-        layout.addLayout(feedback_row)
-
-        # ── NEW: session recording status ─────────────────────────────
-        self._recording_label = QLabel("● Recording: waiting...")
-        self._recording_label.setStyleSheet(
-            "font-family: monospace; font-size: 11px; color: #555;"
-        )
-        layout.addWidget(self._recording_label)
-
-        # ── NEW: annotation counter ───────────────────────────────────
-        self._annotation_label = QLabel("Annotations: 0")
-        self._annotation_label.setStyleSheet(
-            "font-family: monospace; font-size: 11px; color: #888;"
-        )
-        layout.addWidget(self._annotation_label)
+        # # ── NEW: feedback buttons ──────────────────────────────────────
+        # feedback_row = QHBoxLayout()
+        #
+        # self._btn_correct = QPushButton("✓ Correct")
+        # self._btn_correct.setStyleSheet(
+        #     "background: #1a6b3a; color: white; font-weight: bold; padding: 4px;"
+        # )
+        # self._btn_correct.clicked.connect(self._on_feedback_correct)
+        #
+        # self._btn_wrong = QPushButton("✗ Wrong")
+        # self._btn_wrong.setStyleSheet(
+        #     "background: #6b1a1a; color: white; font-weight: bold; padding: 4px;"
+        # )
+        # self._btn_wrong.clicked.connect(self._on_feedback_wrong)
+        #
+        # feedback_row.addWidget(self._btn_correct)
+        # feedback_row.addWidget(self._btn_wrong)
+        # layout.addLayout(feedback_row)
+        #
+        # # ── NEW: session recording status ─────────────────────────────
+        # self._recording_label = QLabel("● Recording: waiting...")
+        # self._recording_label.setStyleSheet(
+        #     "font-family: monospace; font-size: 11px; color: #555;"
+        # )
+        # layout.addWidget(self._recording_label)
+        #
+        # # ── NEW: annotation counter ───────────────────────────────────
+        # self._annotation_label = QLabel("Annotations: 0")
+        # self._annotation_label.setStyleSheet(
+        #     "font-family: monospace; font-size: 11px; color: #888;"
+        # )
+        # layout.addWidget(self._annotation_label)
 
         return box
 
@@ -580,7 +590,7 @@ class MainWindow(QMainWindow):
             self._update_classifier_readout()
         gaze_x, gaze_y = self.shared_state.get_gaze()
         self._check_turn_zones(gaze_x, gaze_y)  # added 2 lines
-        self._update_recording_status()
+        # self._update_recording_status()
 
     def _update_feed(self):
         if self._active_feed == FEED_EYETRACKER:
@@ -620,7 +630,7 @@ class MainWindow(QMainWindow):
                 cv2.rectangle(frame, (x1, y1), (x2, y2), base_color, 2)
 
             direction = "L" if deg < 0 else "R"
-            text = f"{direction}{abs(deg)}°"
+            text = f"{direction}{abs(deg)}deg"
             cv2.putText(
                 frame,
                 text,
@@ -871,8 +881,8 @@ class MainWindow(QMainWindow):
             f"font-family: monospace; font-size: 13px; "
             f"font-weight: bold; color: {colors.get(state_id, '#fff')};"
         )
-        angle = self.shared_state.target_angle.value
-        dist = self.shared_state.target_dist.value
+        angle = self.shared_state.commited_angle.value
+        dist = self.shared_state.commited_dist.value
         if state_id == 1:
             self._target_label.setText(f"Target: {angle:+.1f}°  {dist:.0f}mm")
         else:
@@ -951,59 +961,58 @@ class MainWindow(QMainWindow):
     def _send_motor_command(self, cmd_id: int):
         self.shared_state.motor_command.value = cmd_id
 
-    # Add these two callback methods anywhere in the class callbacks section
+    # # Add these two callback methods anywhere in the class callbacks section
+    # def _on_feedback_correct(self):
+    #     """Mark the current prediction as correct in the recording."""
+    #     if hasattr(self.shared_state, "feedback_correct"):
+    #         self.shared_state.feedback_correct.set()
+    #     # Flash green briefly so user knows it registered
+    #     self._btn_correct.setStyleSheet(
+    #         "background: #00ff66; color: black; font-weight: bold; padding: 4px;"
+    #     )
+    #     QTimer.singleShot(
+    #         300,
+    #         lambda: self._btn_correct.setStyleSheet(
+    #             "background: #1a6b3a; color: white; font-weight: bold; padding: 4px;"
+    #         ),
+    #     )
+    #
+    # def _on_feedback_wrong(self):
+    #     """Mark the current prediction as wrong in the recording."""
+    #     if hasattr(self.shared_state, "feedback_wrong"):
+    #         self.shared_state.feedback_wrong.set()
+    #     self._btn_wrong.setStyleSheet(
+    #         "background: #ff4444; color: white; font-weight: bold; padding: 4px;"
+    #     )
+    #     QTimer.singleShot(
+    #         300,
+    #         lambda: self._btn_wrong.setStyleSheet(
+    #             "background: #6b1a1a; color: white; font-weight: bold; padding: 4px;"
+    #         ),
+    #     )
 
-    def _on_feedback_correct(self):
-        """Mark the current prediction as correct in the recording."""
-        if hasattr(self.shared_state, "feedback_correct"):
-            self.shared_state.feedback_correct.set()
-        # Flash green briefly so user knows it registered
-        self._btn_correct.setStyleSheet(
-            "background: #00ff66; color: black; font-weight: bold; padding: 4px;"
-        )
-        QTimer.singleShot(
-            300,
-            lambda: self._btn_correct.setStyleSheet(
-                "background: #1a6b3a; color: white; font-weight: bold; padding: 4px;"
-            ),
-        )
-
-    def _on_feedback_wrong(self):
-        """Mark the current prediction as wrong in the recording."""
-        if hasattr(self.shared_state, "feedback_wrong"):
-            self.shared_state.feedback_wrong.set()
-        self._btn_wrong.setStyleSheet(
-            "background: #ff4444; color: white; font-weight: bold; padding: 4px;"
-        )
-        QTimer.singleShot(
-            300,
-            lambda: self._btn_wrong.setStyleSheet(
-                "background: #6b1a1a; color: white; font-weight: bold; padding: 4px;"
-            ),
-        )
-
-    # Add this new method:
-    def _update_recording_status(self):
-        """Polls the recording state from shared_state and updates the label."""
-        if not hasattr(self.shared_state, "recording_active"):
-            return
-
-        active = self.shared_state.recording_active.value
-        n_annots = getattr(self.shared_state, "annotation_count", None)
-        count = n_annots.value if n_annots is not None else 0
-
-        if active:
-            self._recording_label.setText("● Recording: active")
-            self._recording_label.setStyleSheet(
-                "font-family: monospace; font-size: 11px; color: #00cc66;"
-            )
-        else:
-            self._recording_label.setText("● Recording: stopped")
-            self._recording_label.setStyleSheet(
-                "font-family: monospace; font-size: 11px; color: #cc3333;"
-            )
-
-        self._annotation_label.setText(f"Annotations: {count}")
+    # # Add this new method:
+    # def _update_recording_status(self):
+    #     """Polls the recording state from shared_state and updates the label."""
+    #     if not hasattr(self.shared_state, "recording_active"):
+    #         return
+    #
+    #     active = self.shared_state.recording_active.value
+    #     n_annots = getattr(self.shared_state, "annotation_count", None)
+    #     count = n_annots.value if n_annots is not None else 0
+    #
+    #     if active:
+    #         self._recording_label.setText("● Recording: active")
+    #         self._recording_label.setStyleSheet(
+    #             "font-family: monospace; font-size: 11px; color: #00cc66;"
+    #         )
+    #     else:
+    #         self._recording_label.setText("● Recording: stopped")
+    #         self._recording_label.setStyleSheet(
+    #             "font-family: monospace; font-size: 11px; color: #cc3333;"
+    #         )
+    #
+    #     self._annotation_label.setText(f"Annotations: {count}")
 
     # ------------------------------------------------------------------
     # Cleanup
