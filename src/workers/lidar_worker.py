@@ -20,7 +20,7 @@ MAX_DISTANCE = 2000  # mm
 MOUNT_OFFSET_DEG = 90
 
 # Front-cone obstacle threshold
-OBSTACLE_THRESHOLD_MM = 380  # 500
+OBSTACLE_THRESHOLD_MM = 400  # 500
 FRONT_CONE_START = 345
 FRONT_CONE_END = 15  # wraps through 0 deg
 
@@ -87,7 +87,8 @@ def lidar_worker(shared_state):
     local_buffer = [0.0] * 360
 
     try:
-        for scan in lidar.iter_scans(max_buf_meas=1000, min_len=50):
+        # max buf increase from 1000->2000, slow consumer
+        for scan in lidar.iter_scans(max_buf_meas=2000, min_len=50):
             if shared_state.shutdown.is_set():
                 break
 
@@ -110,16 +111,17 @@ def lidar_worker(shared_state):
             shared_state.lidar_obstacle_detected.value = collision_imminent
 
             # debug: cardinal directions via +/-10 deg window
-            n = window_min(local_buffer, 0)
-            e = window_min(local_buffer, 90)
-            s = window_min(local_buffer, 180)
-            w = window_min(local_buffer, 270)
-            filled = sum(1 for v in local_buffer if v > 0.0)
+            # n = window_min(local_buffer, 0)
+            # e = window_min(local_buffer, 90)
+            # s = window_min(local_buffer, 180)
+            # w = window_min(local_buffer, 270)
+            # filled = sum(1 for v in local_buffer if v > 0.0)
             # print(
             #     f"[LIDAR] pts={filled:3d} | "
             #     f"N:{n:5.0f}mm  E:{e:5.0f}mm  S:{s:5.0f}mm  W:{w:5.0f}mm"
             #     + ("  OBSTACLE" if collision_imminent else "")
             # )
+            time.sleep(0.1)
 
     except Exception as e:
         print(f"[lidar_worker] Fatal error: {e}")

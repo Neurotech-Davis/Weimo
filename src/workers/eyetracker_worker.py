@@ -40,7 +40,7 @@ PITCH_OFFSET = 0  # Adjust if cursor is too high/low when looking center
 YAW_OFFSET = 0
 # Define this so that the correct matrix is loaded
 BUILTIN_CAMERA_INDEX = 0
-IMAGE_POINT_SMOOTHING = True
+IMAGE_POINT_SMOOTHING = False
 
 
 def get_correct_matrices(index):
@@ -67,7 +67,7 @@ def eyetracker_worker(shared_state):
     # SETUP
     shared_state.tracker_running.value = True
 
-    load_offsets("chengyi")
+    load_offsets("noone")
 
     options = FaceLandmarkerOptions(
         base_options=python.BaseOptions(model_asset_path=model_path),

@@ -114,7 +114,21 @@ def send(ser, cmd, shared_state=None):
     deadline = time.time() + 30.0
 
     while time.time() < deadline:
-        # ... all your existing interrupt/obstacle logic unchanged ...
+        if shared_state is not None:
+            obstacle_blocking = is_drive_cmd and obstacle_detected(shared_state, LIDAR_STOP, YOLO_STOP)
+            if (
+                shared_state.motor_command.value != 0
+                or jaw_clench_detected(shared_state)
+                or obstacle_blocking
+            ):
+                ser.write(b"STOP\n")
+                ser.flush()
+                drain_deadline = time.time() + 2.0
+                while time.time() < drain_deadline:
+                    line = ser.readline().decode().strip()
+                    if line in ("OK:DONE", "OK:STOPPED"):
+                        return "OK:STOPPED"
+                return "OK:STOPPED"
 
         line = ser.readline().decode().strip()
         if "Motor Hat Initialized" in line:
