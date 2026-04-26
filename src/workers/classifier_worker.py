@@ -92,7 +92,7 @@ def preprocess_epoch(data: np.ndarray) -> torch.Tensor:
         "Pz",
     ]
     info = mne.create_info(ch_names=ch_names, sfreq=CONFIGS["SFREQ"], ch_types="eeg")
-    raw = mne.io.RawArray(data, info, verbose=False)
+    raw = mne.io.RawArray(data.astype(np.float64), info, verbose=False)
 
     raw.notch_filter(60.0, verbose=False)
     raw.filter(13, 30.0, verbose=False)
@@ -113,7 +113,7 @@ def filter_for_svm(data: np.ndarray) -> np.ndarray:
     window it saw during training (not the full 5s TRIAL_DUR+LEAD_IN window).
     Returns (n_channels, N_TIMEPOINTS) float64 array ready for bandpower extraction.
     """
-    data = data[:, -CONFIGS["N_TIMEPOINTS"] :]  # clip to 901 first — matches training
+    data = data.astype(np.float64)[:, -CONFIGS["N_TIMEPOINTS"] :]  # clip to 901 first — matches training
     info = mne.create_info(ch_names=CH_NAMES, sfreq=CONFIGS["SFREQ"], ch_types="eeg")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
