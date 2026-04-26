@@ -25,3 +25,6 @@ rplidar-roboticia
 
 ### for vlm
 dotenv
+
+### for yolo
+ultralytics
