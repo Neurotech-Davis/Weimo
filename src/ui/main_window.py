@@ -881,8 +881,8 @@ class MainWindow(QMainWindow):
             f"font-family: monospace; font-size: 13px; "
             f"font-weight: bold; color: {colors.get(state_id, '#fff')};"
         )
-        angle = self.shared_state.commited_angle.value
-        dist = self.shared_state.commited_dist.value
+        angle = self.shared_state.committed_angle.value
+        dist = self.shared_state.committed_dist.value
         if state_id == 1:
             self._target_label.setText(f"Target: {angle:+.1f}°  {dist:.0f}mm")
         else:
