@@ -1,16 +1,13 @@
 from pathlib import Path
 import time
-import sys, os
+import sys
+import os
 import numpy as np
 import cv2
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from pathfinding.camera_nav import screen_to_location
 
-
-# Pretty sure we measured ~11cm and -10 deg.
-MOUNT_HEIGHT = 90  # mm (1.2 m)
-MOUNT_ANGLE = 9.5
 
 # Loading camera correction matrices
 models_dir = Path(__file__).parent.parent / "models"
@@ -26,12 +23,18 @@ def load_calibration():
 
 def pathfinding_worker(shared_state):
     # SETUP
+
+    ## calibrate in /pathfinding/camera_nav/nav_debug_gui.py
+    MOUNT_HEIGHT = shared_state.mount_height.value
+    MOUNT_ANGLE = shared_state.mount_angle.value
+
     try:
-        K, _, dist_coeffs = load_calibration()
+        _, K_new, _ = load_calibration()
         cam_cfg = screen_to_location.CameraConfig(
             height=MOUNT_HEIGHT, angle=MOUNT_ANGLE
         )  # Has to be known beforehand
-        img_w, img_h = 640, 480  # Known ahead of time
+        img_w = shared_state.PATH_FRAME_W.value
+        img_h = shared_state.PATH_FRAME_H.value
 
         shared_state.pathfinding_running.value = True
 
@@ -42,14 +45,10 @@ def pathfinding_worker(shared_state):
             if gaze_x >= 0 and gaze_y >= 0:
                 px = int(gaze_x * img_w)
                 py = int(gaze_y * img_h)
-                # optical correction first
-                distorted = np.array([[[px, py]]], dtype=np.float32)
-                undistorted = cv2.undistortPoints(distorted, K, dist_coeffs, P=K)
-                px = int(undistorted[0, 0, 0])
-                py = int(undistorted[0, 0, 1])
-
                 # then physical trig
-                h_angle, dist = screen_to_location.pixel_to_point(px, py, K, cam_cfg)
+                h_angle, dist = screen_to_location.pixel_to_point(
+                    px, py, K_new, cam_cfg
+                )
                 shared_state.target_angle.value = float(h_angle)
                 shared_state.target_dist.value = float(dist)
             else:
