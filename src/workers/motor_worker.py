@@ -20,9 +20,6 @@ import math
 from enum import Enum
 
 
-# Windows: COM8
-# Linux: /dev/ttyACM0
-PICO_PORT = "COM8"  # Windows: COM3 etc.
 BAUD_RATE = 115200
 
 MOVE_CONFIDENCE_THRESHOLD = 0.95
@@ -137,6 +134,9 @@ def navigate_to(ser, h_angle: float, dist_mm: float, shared_state) -> bool:
 
 
 def motor_worker(shared_state):
+    # Windows: COM8
+    # Linux: /dev/ttyACM0
+    PICO_PORT = "/dev/ttyACM0" if shared_state.on_linux else "COM8"
     ser = None
     try:
         ser = connect(PICO_PORT, BAUD_RATE)

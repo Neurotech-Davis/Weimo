@@ -12,8 +12,6 @@ RPLIDAR worker process.
 from rplidar import RPLidar, RPLidarException
 import time
 
-# Windows: COM3/COM9
-PORT = "/dev/ttyUSB0"
 BAUD = 115200
 MIN_DISTANCE = 50  # mm
 MAX_DISTANCE = 2000  # mm
@@ -77,6 +75,8 @@ def attempt_lidar_connection(port, baud, max_retries=5, retry_delay=2):
 
 
 def lidar_worker(shared_state):
+    # Windows: COM3/COM9
+    PORT = "/dev/ttyUSB0" if shared_state.on_linux else "COM9"
     lidar = attempt_lidar_connection(PORT, BAUD)
     if lidar is None:
         print("[lidar_worker] Could not connect to RPLIDAR")
