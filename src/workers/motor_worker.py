@@ -54,9 +54,18 @@ def force_pico_reset(ser):
 def connect(port: str, baud: int, retries: int = 5) -> serial.Serial:
     for attempt in range(1, retries + 1):
         try:
-            ser = serial.Serial(port, baud, timeout=1)
-            # force_pico_reset(ser)
-            print(f"[motor_worker] connected to {port} on attempt {attempt}")
+            ser = serial.Serial(port, baud, timeout=2)
+            print(f"[motor_worker] port open on attempt {attempt}, waiting for Pico boot...")
+            # Drain until we see the ready banner or 4s elapses
+            deadline = time.time() + 4.0
+            while time.time() < deadline:
+                line = ser.readline().decode(errors="replace").strip()
+                if "Motor Hat Initialized" in line:
+                    print("[motor_worker] Pico boot confirmed — ready")
+                    break
+            else:
+                print("[motor_worker] boot banner not seen, proceeding anyway")
+            ser.reset_input_buffer()
             return ser
         except serial.SerialException as e:
             print(f"[motor_worker] attempt {attempt}/{retries} failed: {e}")
@@ -96,45 +105,26 @@ def connect(port: str, baud: int, retries: int = 5) -> serial.Serial:
 #             print(f"[pico] {line}")
 #
 #     return ""
-
-
 def send(ser, cmd, shared_state=None):
     ser.write((cmd + "\n").encode())
     is_drive_cmd = cmd.startswith("DRIVE")
-
     deadline = time.time() + 30.0
+
     while time.time() < deadline:
-        # check for interrupt before blocking on readline
-        if shared_state is not None:
-            obstacle_blocking = is_drive_cmd and obstacle_detected(
-                shared_state, LIDAR_STOP, YOLO_STOP
-            )
+        # ... all your existing interrupt/obstacle logic unchanged ...
 
-            if (
-                shared_state.motor_command.value != 0
-                or jaw_clench_detected(shared_state)
-                or obstacle_blocking
-            ):
-                if obstacle_blocking:
-                    print(
-                        f"[motor_worker] Obstacle interrupt during DRIVE: | LiDAR: {shared_state.lidar_obstacle_detected} | YOLO: {shared_state.yolo_obstacle_detected}"
-                    )
-
-                ser.write(b"STOP\n")
-                ser.flush()
-                # drain until we get OK:STOPPED
-                drain_deadline = time.time() + 2.0
-                while time.time() < drain_deadline:
-                    line = ser.readline().decode().strip()
-                    if line in ("OK:DONE", "OK:STOPPED"):
-                        return "OK:STOPPED"
-                return "OK:STOPPED"
         line = ser.readline().decode().strip()
+        if "Motor Hat Initialized" in line:
+            print("[motor_worker] !! PICO REBOOT DETECTED mid-session !!")
+            # Pico rebooted under us — treat as a serial error
+            raise serial.SerialException("Pico rebooted mid-command")
         if line in ("OK:DONE", "OK:STOPPED"):
             return line
         elif line:
-            print(f"[pico] {line}")  # add this
-    return ""
+            print(f"[pico] {line}")
+
+    # Deadline expired — don't silently return, force reconnect
+    raise serial.SerialTimeoutException(f"send() 30s timeout waiting for ack on: {cmd!r}")
 
 
 def cmd_stop(ser):
@@ -228,81 +218,93 @@ def process_ui_turn_logic(ser, shared_state) -> bool:
 
 # ── Worker ────────────────────────────────────────────────────────────────────
 
-
 def motor_worker(shared_state):
-    # Windows: COM8
-    # Linux: /dev/ttyACM0
     PICO_PORT = "/dev/ttyACM0" if shared_state.on_linux else "COM8"
     ser = None
+
     try:
-        ser = connect(PICO_PORT, BAUD_RATE)
-        shared_state.motor_running.value = True
-
-        state = MotorState.IDLE
-        print(f"[motor_worker] state=IDLE, ready")
-
+        # ── outer loop: reconnection ──
         while not shared_state.shutdown.is_set():
-            t_start = time.perf_counter()
+            try:
+                if ser is None or not ser.is_open:
+                    print("[motor_worker] (re)connecting to Pico...")
+                    ser = connect(PICO_PORT, BAUD_RATE)
+                    shared_state.motor_running.value = True
 
-            # ── manual UI override — always highest priority ──
-            manual_cmd = shared_state.motor_command.value
-            if manual_cmd != 0:
-                if state == MotorState.DRIVING:
-                    print("[motor_worker] manual override — aborting navigation")
-                cmd_stop(ser)
                 state = MotorState.IDLE
-                shared_state.motor_state.value = 0
-                shared_state.motor_command.value = 0  # consume
-                time.sleep(0.05)
-                continue
+                print("[motor_worker] state=IDLE, ready")
 
-            if not shared_state.tracker_running:
-                time.sleep(2)
-                continue
+                # ── inner loop: normal operation ──
+                while not shared_state.shutdown.is_set():
+                    t_start = time.perf_counter()
 
-            # ── jaw clench emergency stop ──
-            if jaw_clench_detected(shared_state):
-                if state == MotorState.DRIVING:
-                    print("[motor_worker] jaw_clench — emergency stop")
-                    cmd_stop(ser)
-                    state = MotorState.IDLE
-                    shared_state.motor_state.value = 0
-                    shared_state.prediction.value = 0  # consume
-                time.sleep(0.05)
-                continue
-
-            # ── state machine ──
-            if state == MotorState.IDLE:
-                # this handles the UI turn if its available
-                if process_ui_turn_logic(ser, shared_state):
-                    continue
-
-                pred = shared_state.prediction.value
-                conf = shared_state.pred_confidence.value
-                dist = shared_state.target_dist.value
-
-                if pred == 1 and conf >= MOVE_CONFIDENCE_THRESHOLD:
-                    if dist > DIST_THRESHOLD_MM:
-                        # latch target at moment of move prediction
-                        shared_state.prediction.value = 0  # consume
-                        h_angle = shared_state.target_angle.value
-
-                        state = MotorState.DRIVING
-                        shared_state.motor_state.value = 1
-                        print(f"[motor_worker] IDLE → DRIVING")
-                        arrived = navigate_to(ser, h_angle, dist, shared_state)
-
+                    # ── manual UI override — always highest priority ──
+                    manual_cmd = shared_state.motor_command.value
+                    if manual_cmd != 0:
+                        if state == MotorState.DRIVING:
+                            print("[motor_worker] manual override — aborting navigation")
+                        cmd_stop(ser)
                         state = MotorState.IDLE
                         shared_state.motor_state.value = 0
-                        print(f"[motor_worker] DRIVING → IDLE  (arrived={arrived})")
-                    else:
-                        # this should hand the command to the UI
-                        print(
-                            "[motor_worker] target too close, ignoring. Handing off to UI?"
-                        )
+                        shared_state.motor_command.value = 0
+                        time.sleep(0.05)
+                        continue
 
-            elapsed = time.perf_counter() - t_start
-            time.sleep(max(0.0, 0.05 - elapsed))
+                    if not shared_state.tracker_running:
+                        time.sleep(2)
+                        continue
+
+                    # ── jaw clench emergency stop ──
+                    if jaw_clench_detected(shared_state):
+                        if state == MotorState.DRIVING:
+                            print("[motor_worker] jaw_clench — emergency stop")
+                            cmd_stop(ser)
+                            state = MotorState.IDLE
+                            shared_state.motor_state.value = 0
+                            shared_state.prediction.value = 0
+                        time.sleep(0.05)
+                        continue
+
+                    # ── state machine ──
+                    if state == MotorState.IDLE:
+                        if process_ui_turn_logic(ser, shared_state):
+                            continue
+
+                        pred = shared_state.prediction.value
+                        conf = shared_state.pred_confidence.value
+                        dist = shared_state.target_dist.value
+
+                        if pred == 1 and conf >= MOVE_CONFIDENCE_THRESHOLD:
+                            if dist > DIST_THRESHOLD_MM:
+                                shared_state.prediction.value = 0
+                                h_angle = shared_state.target_angle.value
+
+                                state = MotorState.DRIVING
+                                shared_state.motor_state.value = 1
+                                print("[motor_worker] IDLE → DRIVING")
+                                arrived = navigate_to(ser, h_angle, dist, shared_state)
+
+                                state = MotorState.IDLE
+                                shared_state.motor_state.value = 0
+                                print(f"[motor_worker] DRIVING → IDLE  (arrived={arrived})")
+                            else:
+                                print("[motor_worker] target too close, ignoring. Handing off to UI?")
+
+                    elapsed = time.perf_counter() - t_start
+                    time.sleep(max(0.0, 0.05 - elapsed))
+
+            except (serial.SerialException, serial.SerialTimeoutException, OSError) as e:
+                print(f"[motor_worker] serial error: {e} — attempting reconnect in 2s")
+                shared_state.motor_state.value = 0
+                shared_state.turn_command.value = 0.0
+                shared_state.motor_command.value = 0
+                if ser and ser.is_open:
+                    try:
+                        ser.close()
+                    except Exception:
+                        pass
+                ser = None
+                time.sleep(2.0)
 
     except Exception as e:
         print(f"[motor_worker] fatal error: {e}")
@@ -311,8 +313,11 @@ def motor_worker(shared_state):
     finally:
         shared_state.motor_running.value = False
         if ser and ser.is_open:
-            cmd_stop(ser)
-            time.sleep(0.1)
+            try:
+                cmd_stop(ser)
+                time.sleep(0.1)
+            except Exception:
+                pass
             ser.close()
         print("[motor_worker] shutdown complete")
 

@@ -20,7 +20,7 @@ MAX_DISTANCE = 2000  # mm
 MOUNT_OFFSET_DEG = 90
 
 # Front-cone obstacle threshold
-OBSTACLE_THRESHOLD_MM = 300  # 500
+OBSTACLE_THRESHOLD_MM = 380  # 500
 FRONT_CONE_START = 345
 FRONT_CONE_END = 15  # wraps through 0 deg
 
