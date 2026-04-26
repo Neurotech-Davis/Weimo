@@ -153,16 +153,15 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._build_motor_group())
         layout.addWidget(self._build_pathfinding_group())
 
-        if self.demo_classifier:
-            layout.addWidget(self._build_classifier_group())  # live readout
-            layout.addWidget(self._build_demo_classifier_group())
-        elif self.mock_classifier:
+        # Always show the live classifier readout
+        layout.addWidget(self._build_classifier_group())
+
+        # Always show the demo classifier
+        layout.addWidget(self._build_demo_classifier_group())
+
+        # Only show extra mock/mixed buttons if specifically requested
+        if self.mock_classifier or self.mixed_classifier:
             layout.addWidget(self._build_mock_classifier_group())
-        elif self.mixed_classifier:
-            layout.addWidget(self._build_classifier_group())  # live readout
-            layout.addWidget(self._build_mock_classifier_group())  # + override buttons
-        else:
-            layout.addWidget(self._build_classifier_group())
 
         layout.addWidget(self._build_lidar_minimap_widget())
         return layout
@@ -489,18 +488,21 @@ class MainWindow(QMainWindow):
         )
 
     def keyPressEvent(self, event):
-        if self.demo_classifier:
-            key = event.key()
-            if key == Qt.Key.Key_M:
-                self._demo_mode_btn.setChecked(not self._demo_mode_btn.isChecked())
-                self._toggle_demo_override()
-            elif self.shared_state.demo_override.value:
-                if key == Qt.Key.Key_Comma:
-                    self._demo_move()
-                elif key == Qt.Key.Key_Period:
-                    self._demo_idle()
-                elif key == Qt.Key.Key_Slash:
-                    self._demo_jaw_clench()
+        # These keys now work regardless of launch flags
+        key = event.key()
+        if key == Qt.Key.Key_M:
+            self._demo_mode_btn.setChecked(not self._demo_mode_btn.isChecked())
+            self._toggle_demo_override()
+        
+        # If the manual override toggle is ON, check for movement keys
+        elif self.shared_state.demo_override.value:
+            if key == Qt.Key.Key_Comma:
+                self._demo_move()
+            elif key == Qt.Key.Key_Period:
+                self._demo_idle()
+            elif key == Qt.Key.Key_Slash:
+                self._demo_jaw_clench()
+                
         super().keyPressEvent(event)
 
     # --- Motor controls ---
