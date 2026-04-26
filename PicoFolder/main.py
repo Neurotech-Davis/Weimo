@@ -116,31 +116,43 @@ def robust_avg_ticks():
 def get_drive_multiplier(target_meters):
     val = abs(target_meters)
     if val <= 0.10:
-        return 0.71
+        return 0.83
     elif val <= 0.15:
-        return 0.58
+        return 0.76
     elif val <= 0.20:
-        return 0.56
+        return 0.66
     elif val <= 0.30:
-        return 0.53
+        return 0.61
     elif val <= 0.40:
-        return 0.50
+        return 0.59
     elif val <= 0.50:
-        return 0.47
+        return 0.56
     elif val <= 0.60:
-        return 0.47
+        return 0.55
     elif val <= 0.70:
-        return 0.46
+        return 0.54
     elif val <= 0.80:
-        return 0.45
+        return 0.54
     else:
-        return 0.39
+        return 0.51
 
 
 def get_turn_multiplier(degrees):
-    # Turns behave differently mechanically.
-    # Testing proved a 1.0 multiplier yields between 45 and 55 degrees.
-    return 0.90
+    val = abs(degrees)
+    
+    # Positive turns (Right) - Handled the weight well
+    if degrees > 0:
+        if val <= 45:
+            return 0.98
+        else:
+            return 0.91
+            
+    # Negative turns (Left) - Struggled massively against the weight
+    else:
+        if val <= 45:
+            return 1.64
+        else:
+            return 1.80
 
 
 # --- MOTION ENGINE ---
@@ -154,7 +166,7 @@ def drive_distance(target_meters):
     Kp = 5.0
     max_speed = 1100  # Lowered for stable SNR
     min_speed = 800
-    accel_rate = 50
+    accel_rate = 20
     current_speed = 0
     loop_count = 0
 
@@ -172,6 +184,10 @@ def drive_distance(target_meters):
                 stop_all_motors()
                 print("OK:STOPPED")
                 return
+        
+        if time.ticks_diff(time.ticks_ms(), start_time) > timeout_ms:
+            print("ERROR: TIMEOUT REACHED - ABORTING DRIVE")
+            break
 
         avg_ticks = robust_avg_ticks()
         error = target_ticks - avg_ticks
@@ -216,7 +232,7 @@ def turn_robot(degrees):
     Kp = 5.0
     max_speed = 1100  # Lowered for stable SNR
     min_speed = 800
-    accel_rate = 50
+    accel_rate = 20
     current_speed = 0
     loop_count = 0
 
@@ -231,6 +247,10 @@ def turn_robot(degrees):
         if poll_obj.poll(0):
             if sys.stdin.readline().strip() == "STOP":
                 break
+        
+        if time.ticks_diff(time.ticks_ms(), start_time) > timeout_ms:
+            print("ERROR: TIMEOUT REACHED - ABORTING TURN")
+            break
 
         avg_ticks = robust_avg_ticks()
         error = target_ticks - avg_ticks
