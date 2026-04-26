@@ -1,4 +1,5 @@
 import time
+import json
 from pathlib import Path
 
 import cv2
@@ -48,9 +49,26 @@ def get_correct_matrices(index):
     return cam_matrix_usb, cam_matrix_new_usb, dist_usb
 
 
+def load_offsets(name):
+    cal_path = (
+        Path(__file__).parent.parent / "calibrations" / f"{shared_state.user_id}.json"
+    )
+    if cal_path.exists():
+        cal = json.loads(cal_path.read_text())
+        PITCH_OFFSET = cal["pitch_offset"]
+        YAW_OFFSET = cal["yaw_offset"]
+        print(f"[eyetracker_worker] Loaded calibration for '{name}'")
+    else:
+        PITCH_OFFSET = 0
+        YAW_OFFSET = 0
+        print("[eyetracker_worker] No calibration found, using defaults")
+
+
 def eyetracker_worker(shared_state):
     # SETUP
     shared_state.tracker_running.value = True
+
+    load_offsets("chengyi")
 
     options = FaceLandmarkerOptions(
         base_options=python.BaseOptions(model_asset_path=model_path),
