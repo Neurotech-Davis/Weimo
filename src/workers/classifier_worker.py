@@ -24,7 +24,7 @@ from mne_lsl.stream import StreamLSL
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from ml_model import models
 
-PREDICTION_WINDOW_LEN = 3
+PREDICTION_WINDOW_LEN = 4
 PREDICTION_THRESHOLD = 2
 LABEL_MAP = {0: "idle", 1: "move", 2: "jaw_clench"}
 EXCLUDE = {"Trigger", "Event"}
@@ -42,8 +42,8 @@ CONFIGS["N_TIMEPOINTS"] = (
 )  # MNE tmax inclusive → 901
 
 _MODELS_DIR    = os.path.join(os.path.dirname(__file__), "..", "models")
-MODEL_PATH     = os.path.join(_MODELS_DIR, "DeepConvNet_per_epoch.pt")
-SVM_MODEL_PATH = os.path.join(_MODELS_DIR, "SVM_linear__beta__bandpower.pkl")
+MODEL_PATH     = os.path.join(_MODELS_DIR, "DeepConvNet_per_epoch_full.pt")
+SVM_MODEL_PATH = os.path.join(_MODELS_DIR, "SVM_linear__beta__bandpower_full.pkl")
 STREAM_NAME = "WS-default"
 
 CH_NAMES = [
@@ -212,6 +212,7 @@ def load_svm():
     with open(SVM_MODEL_PATH, "rb") as f:
         svm = pickle.load(f)
     print(f"[classifier_worker] Loaded SVM from {SVM_MODEL_PATH}")
+    print(f"[classifier_worker] SVM classes_: {svm.classes_}")
     return svm
 
 
