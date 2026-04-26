@@ -24,8 +24,6 @@ from mne_lsl.stream import StreamLSL
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from ml_model import models
 
-MOVE_CONFIDENCE_THRESHOLD = 0.9
-JAW_CONFIDENCE_THRESHOLD = 0.80
 PREDICTION_WINDOW_LEN = 3
 PREDICTION_THRESHOLD = 2
 LABEL_MAP = {0: "idle", 1: "move", 2: "jaw_clench"}
@@ -36,7 +34,7 @@ CONFIGS = {
     "N_CLASSES": 2,  # 2 for binary
     "TRIAL_DUR": 3,
     "SFREQ": 300,
-    "STRIDE_SEC": 1,
+    "STRIDE_SEC": 0.5,
     "LEAD_IN": 2,
 }
 CONFIGS["N_TIMEPOINTS"] = (

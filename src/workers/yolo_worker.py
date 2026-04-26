@@ -11,6 +11,7 @@ models_dir = Path(__file__).parent.parent / "models"
 MODEL_NAME = str(models_dir / "yolov8n.pt")
 
 MAX_DIST_MM = 200  # ignore objects further than this
+MAX_BOX_AREA_RATIO = 0.90  # ignore detections covering more than 90% of the frame
 TRACK_HALF_WIDTH_MM = 180  # half the buggy's physical track width
 
 _MATRICES_DIR = (
@@ -116,6 +117,8 @@ def yolo_worker(shared_state):
             obstacle = False
             for box in results.boxes:
                 x1, y1, x2, y2 = (int(v) for v in box.xyxy[0].tolist())
+                if (x2 - x1) * (y2 - y1) > MAX_BOX_AREA_RATIO * W * H:
+                    continue
                 if path_mask[y1:y2, x1:x2].any():
                     obstacle = True
                     break
@@ -133,8 +136,8 @@ def yolo_worker(shared_state):
 
 if __name__ == "__main__":
     W, H = 640, 480
-    MOUNT_HEIGHT_TEST = 118  # mm — adjust to match your setup
-    MOUNT_ANGLE_TEST = 9.7  # degrees downward — adjust to match your setup
+    MOUNT_HEIGHT_TEST = 300  # mm — adjust to match your setup
+    MOUNT_ANGLE_TEST = 30  # degrees downward — adjust to match your setup
 
     K = _load_K("built-in")
     path_mask = _build_path_mask(W, H, K, MOUNT_HEIGHT_TEST, MOUNT_ANGLE_TEST)
@@ -144,7 +147,7 @@ if __name__ == "__main__":
     mask_overlay = np.zeros((H, W, 3), dtype=np.uint8)
     mask_overlay[path_mask == 1] = (0, 255, 0)
 
-    cap = cv2.VideoCapture(64)
+    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, W)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, H)
 
@@ -159,6 +162,8 @@ if __name__ == "__main__":
         obstacle = False
         for box in results.boxes:
             x1, y1, x2, y2 = (int(v) for v in box.xyxy[0].tolist())
+            if (x2 - x1) * (y2 - y1) > MAX_BOX_AREA_RATIO * W * H:
+                continue
             in_path = path_mask[y1:y2, x1:x2].any()
             if in_path:
                 obstacle = True

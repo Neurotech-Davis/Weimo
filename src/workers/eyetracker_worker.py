@@ -34,13 +34,13 @@ model_points = np.array(
 )
 
 
-SENSITIVITY_X = 60
+SENSITIVITY_X = 80
 SENSITIVITY_Y = 40
 PITCH_OFFSET = 0  # Adjust if cursor is too high/low when looking center
 YAW_OFFSET = 0
 # Define this so that the correct matrix is loaded
 BUILTIN_CAMERA_INDEX = 0
-IMAGE_POINT_SMOOTHING = False
+IMAGE_POINT_SMOOTHING = True
 
 
 def get_correct_matrices(index):
@@ -67,7 +67,7 @@ def eyetracker_worker(shared_state):
     # SETUP
     shared_state.tracker_running.value = True
 
-    load_offsets("noone")
+    load_offsets("chengyi")
 
     options = FaceLandmarkerOptions(
         base_options=python.BaseOptions(model_asset_path=model_path),

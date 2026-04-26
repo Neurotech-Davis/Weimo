@@ -25,16 +25,16 @@ def pathfinding_worker(shared_state):
     # SETUP
 
     ## calibrate in /pathfinding/camera_nav/nav_debug_gui.py
-    MOUNT_HEIGHT = shared_state.mount_height.value
-    MOUNT_ANGLE = shared_state.mount_angle.value
+    MOUNT_HEIGHT = shared_state.mount_height
+    MOUNT_ANGLE = shared_state.mount_angle
 
     try:
         _, K_new, _ = load_calibration()
         cam_cfg = screen_to_location.CameraConfig(
             height=MOUNT_HEIGHT, angle=MOUNT_ANGLE
         )  # Has to be known beforehand
-        img_w = shared_state.PATH_FRAME_W.value
-        img_h = shared_state.PATH_FRAME_H.value
+        img_w = shared_state.PATH_FRAME_W
+        img_h = shared_state.PATH_FRAME_H
 
         shared_state.pathfinding_running.value = True
 

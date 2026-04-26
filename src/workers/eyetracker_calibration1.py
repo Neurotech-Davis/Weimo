@@ -51,7 +51,7 @@ W, H = 640, 480
 
 def get_correct_matrices(index):
     # returns K, K_new, dist
-    if index == 0:
+    if index == 1:
         return cam_matrix_builtin, cam_matrix_new_builtin, dist_builtin
     return cam_matrix_usb, cam_matrix_new_usb, dist_usb
 
