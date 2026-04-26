@@ -38,6 +38,7 @@ sys.path.insert(0, ROOT)
 from ml_model import models
 from ml_model.MI_calibration import run_preprocessing, run_finetuning, LABEL_MAP, MODEL_PATH
 from ml_model.jaw_clench_calibration import build_baseline, detect, WINDOW_SEC
+from scipy.signal import sosfilt
 from processing.preprocess_pipeline import add_idle_class
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -290,11 +291,15 @@ def main():
                 n_samps     = data.shape[1]
                 consecutive = 0
                 ring        = deque(maxlen=args.ratio_window)
+                confs       = []
                 for w0 in range(0, n_samps - N_TIMEPOINTS + 1, stride_samps):
                     window = data[:, w0: w0 + N_TIMEPOINTS]
                     x      = _preprocess_epoch(window, eeg_chs)
                     with torch.no_grad():
-                        hit = model(x).argmax(1).item() == move_class
+                        out  = model(x)
+                        conf = out[0, move_class].item()
+                        hit  = out.argmax(1).item() == move_class
+                    confs.append(conf)
                     consecutive = consecutive + 1 if hit else 0
                     ring.append(int(hit))
                     if consecutive >= args.concurrent:
@@ -303,17 +308,26 @@ def main():
                     if args.ratio_hits and len(ring) == args.ratio_window and sum(ring) >= args.ratio_hits:
                         correct = True
                         break
+                avg_conf = sum(confs) / len(confs) if confs else 0.0
+                max_conf = max(confs) if confs else 0.0
 
             elif label == "jaw_clench":
                 win_samps   = int(WINDOW_SEC * sfreq) if jaw_svm is None else N_TIMEPOINTS
                 consecutive = 0
                 ring        = deque(maxlen=args.ratio_window)
+                confs       = []
                 for w0 in range(0, data.shape[1] - win_samps + 1, stride_samps):
                     window = data[:, w0: w0 + win_samps]
                     if jaw_svm is not None:
-                        hit = jaw_svm.predict(_jaw_svm_features(window, eeg_chs))[0] == 1
+                        feats = _jaw_svm_features(window, eeg_chs)
+                        hit   = jaw_svm.predict(feats)[0] == 1
+                        conf  = jaw_svm.predict_proba(feats)[0][1]
                     else:
-                        hit = detect(window, baseline)
+                        filtered = sosfilt(baseline['sos'], window, axis=1)
+                        rms  = float(np.sqrt((filtered ** 2).mean()))
+                        conf = rms / baseline['threshold']   # >1 means detected
+                        hit  = rms > baseline['threshold']
+                    confs.append(conf)
                     consecutive = consecutive + 1 if hit else 0
                     ring.append(int(hit))
                     if consecutive >= args.concurrent:
@@ -322,10 +336,12 @@ def main():
                     if args.ratio_hits and len(ring) == args.ratio_window and sum(ring) >= args.ratio_hits:
                         correct = True
                         break
+                avg_conf = sum(confs) / len(confs) if confs else 0.0
 
             results[label]["correct"] += int(correct)
             mark = "✓" if correct else "✗"
-            print(f"  {mark}  {label:<14}  onset={onset:7.1f}s")
+            conf_str = f"  avg={avg_conf:.2f}  max={max_conf:.2f}" if label == "move" else f"  avg_conf={avg_conf:.2f}"
+            print(f"  {mark}  {label:<14}  onset={onset:7.1f}s  {conf_str}")
 
         # ── Idle (true-negative) check ────────────────────────────────────────
         val_start = val_anns[0]["onset"]
