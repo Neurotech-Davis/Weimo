@@ -44,8 +44,7 @@ from processing.preprocess_pipeline import add_idle_class
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 DEFAULT_FIF      = os.path.join(ROOT, "data_collection", "annotated_fifs", "chengyi_4_21_1.fif")
-DEFAULT_JAW_SVM  = os.path.join(ROOT, "ml_model", "loso_classical_models",
-                                 "jaw_clench", "SVM_linear__alpha__bandpower.pkl")
+DEFAULT_JAW_SVM  = os.path.join(ROOT, "src", "models", "SVM_linear__beta__bandpower.pkl")
 EEG_EXCLUDE  = {"Trigger", "Event"}
 SFREQ        = 300
 N_TIMEPOINTS = int(SFREQ * 3.0) + 1     # 901 samples — tmax=3.0 inclusive in MNE
@@ -64,12 +63,13 @@ def _preprocess_epoch(data: np.ndarray, ch_names: list) -> torch.Tensor:
     data     : (n_ch, n_samples) raw EEG
     Returns  : (1, 1, n_ch, 901) float32 tensor
     """
+    data = data[:, -N_TIMEPOINTS:]
     info = mne.create_info(ch_names=ch_names, sfreq=SFREQ, ch_types="eeg")
     raw  = mne.io.RawArray(data, info, verbose=False)
     raw.notch_filter(60.0, verbose=False)
     raw.filter(13, 30.0, verbose=False)
     raw.set_eeg_reference(ref_channels="average", verbose=False)
-    X    = raw.get_data()[:, -N_TIMEPOINTS:]
+    X    = raw.get_data()
     mean = X.mean(axis=-1, keepdims=True)
     std  = X.std(axis=-1, keepdims=True) + 1e-8
     X    = (X - mean) / std
@@ -80,16 +80,23 @@ def _preprocess_epoch(data: np.ndarray, ch_names: list) -> torch.Tensor:
 
 
 def _jaw_svm_features(data: np.ndarray, ch_names: list) -> np.ndarray:
-    """Alpha bandpass → bandpower features for the jaw-clench SVM.
+    """Notch 60Hz → beta bandpass → average rereference → bandpower features.
 
-    Matches the training pipeline: bandpass [8-13 Hz], extract_bandpower
-    (5 bands × n_channels log-mean power). Returns (1, n_features) float32.
+    Matches classifier_worker.filter_for_svm + extract_bandpower_features:
+    notch 60Hz, bandpass [13-30 Hz], avg rereference, then 5 bands × n_channels
+    log-mean power. Returns (1, n_features) float32.
     """
     data  = data[:, -N_TIMEPOINTS:]
     info  = mne.create_info(ch_names=ch_names, sfreq=SFREQ, ch_types="eeg")
-    epoch = mne.EpochsArray(data[np.newaxis], info,
-                            events=np.array([[0, 0, 1]]), tmin=0, verbose=False)
-    epoch.filter(8.0, 13.0, verbose=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        arr = mne.filter.notch_filter(
+            data[np.newaxis].astype(np.float64), Fs=SFREQ, freqs=60.0, verbose=False
+        )
+        epoch = mne.EpochsArray(arr, info,
+                                events=np.array([[0, 0, 1]]), tmin=0, verbose=False)
+        epoch.filter(13.0, 30.0, verbose=False)
+        epoch.set_eeg_reference(ref_channels="average", projection=False, verbose=False)
     filtered = epoch.get_data()[0]   # (n_ch, n_times)
     feats = []
     for c in range(filtered.shape[0]):
