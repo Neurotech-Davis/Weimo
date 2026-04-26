@@ -36,7 +36,8 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT)
 
 from ml_model import models
-from ml_model.MI_calibration import run_preprocessing, run_finetuning, LABEL_MAP, MODEL_PATH
+import ml_model.MI_calibration as _mi_calib
+from ml_model.MI_calibration import run_preprocessing, run_finetuning, LABEL_MAP
 from ml_model.jaw_clench_calibration import build_baseline, detect, WINDOW_SEC
 from scipy.signal import sosfilt
 from processing.preprocess_pipeline import add_idle_class
@@ -44,7 +45,11 @@ from processing.preprocess_pipeline import add_idle_class
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 DEFAULT_FIF      = os.path.join(ROOT, "data_collection", "annotated_fifs", "chengyi_4_21_1.fif")
-DEFAULT_JAW_SVM  = os.path.join(ROOT, "src", "models", "SVM_linear__beta__bandpower.pkl")
+DEFAULT_JAW_SVM  = os.path.join(ROOT, "ml_model", "loso_classical_models", "jaw_clench", "SVM_linear__alpha__bandpower.pkl")
+DL_MODEL_PATH    = os.path.join(ROOT, "ml_model", "loso_dl_models", "move", "DeepConvNet_per_epoch.pt")
+
+# Patch MI_calibration so run_finetuning also starts from the LOSO model
+_mi_calib.MODEL_PATH = DL_MODEL_PATH
 EEG_EXCLUDE  = {"Trigger", "Event"}
 SFREQ        = 300
 N_TIMEPOINTS = int(SFREQ * 3.0) + 1     # 901 samples — tmax=3.0 inclusive in MNE
@@ -239,7 +244,7 @@ def main():
         # ── Step 2: Fine-tune MI model (or load base) ─────────────────────────
         if args.base_model:
             print("\n[Step 2] Skipping fine-tuning — using base pretrained model.")
-            used_model_path = MODEL_PATH
+            used_model_path = DL_MODEL_PATH
         else:
             print("\n[Step 2] Preprocessing + fine-tuning MI model...")
             ft_args    = SimpleNamespace(
