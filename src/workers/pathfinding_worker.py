@@ -17,8 +17,8 @@ cam_matrix_new_usb = np.load(models_dir / "intrinsicNew_usb.npy")
 dist_usb = np.load(models_dir / "dist_usb.npy")
 
 
-X_GUTTER = 0.20  # 15% on each side for UI + 5% margin
-Y_GUTTER = 0.30  # 25% for top/bottom button height + 5% margin
+X_GUTTER = 0.15 + 0.02  # 15% on each side for UI + 2% margin
+Y_GUTTER = 0.25 + 0.03  # 25% for top/bottom button height + 3% margin
 
 
 def is_gaze_in_ui(gx, gy):

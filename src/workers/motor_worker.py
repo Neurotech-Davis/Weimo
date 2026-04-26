@@ -161,9 +161,9 @@ def cmd_stop_immediate(ser):
 def obstacle_detected(shared_state, lidar_stop=True, yolo_stop=True):
     emergency_stop = False
     if lidar_stop:
-        emergency_stop = emergency_stop or shared_state.lidar_obstacle_detected
+        emergency_stop = emergency_stop or shared_state.lidar_obstacle_detected.value
     if yolo_stop:
-        emergency_stop = emergency_stop or shared_state.yolo_obstacle_detected
+        emergency_stop = emergency_stop or shared_state.yolo_obstacle_detected.value
     return emergency_stop
 
 
