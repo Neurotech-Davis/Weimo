@@ -6,6 +6,7 @@ For this worker to work, it has to be connected to the DSI-7s LSL streamer
 import time
 import sys
 import os
+from collections import deque
 import pickle
 import warnings
 
@@ -14,6 +15,7 @@ import torch
 import mne
 
 mne.set_log_level("ERROR")
+# this silences the MNE warnings about filter length
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="mne")
 
 from mne_lsl.lsl import local_clock
@@ -22,8 +24,10 @@ from mne_lsl.stream import StreamLSL
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from ml_model import models
 
-MOVE_CONFIDENCE_THRESHOLD = 0.95
-JAW_CONFIDENCE_THRESHOLD  = 0.80
+MOVE_CONFIDENCE_THRESHOLD = 0.9
+JAW_CONFIDENCE_THRESHOLD = 0.80
+PREDICTION_WINDOW_LEN = 3
+PREDICTION_THRESHOLD = 2
 LABEL_MAP = {0: "idle", 1: "move", 2: "jaw_clench"}
 EXCLUDE = {"Trigger", "Event"}
 
@@ -39,18 +43,27 @@ CONFIGS["N_TIMEPOINTS"] = (
     int(CONFIGS["SFREQ"] * CONFIGS["TRIAL_DUR"]) + 1
 )  # MNE tmax inclusive → 901
 
-MODEL_PATH     = "./models/DeepConvNet_per_epoch.pt"
+MODEL_PATH = "./models/DeepConvNet_per_epoch.pt"
 SVM_MODEL_PATH = "./models/SVM_linear__beta__bandpower.pkl"
-STREAM_NAME    = "WS-default"
+STREAM_NAME = "WS-default"
 
 CH_NAMES = [
-    "EEG LE-Pz", "EEG F4-Pz", "EEG C4-Pz", "EEG P4-Pz",
-    "EEG P3-Pz", "EEG C3-Pz", "EEG F3-Pz", "Pz",
+    "EEG LE-Pz",
+    "EEG F4-Pz",
+    "EEG C4-Pz",
+    "EEG P4-Pz",
+    "EEG P3-Pz",
+    "EEG C3-Pz",
+    "EEG F3-Pz",
+    "Pz",
 ]
 
 _BP_BANDS = {
-    "theta": (4, 8), "alpha": (8, 13), "beta": (13, 30),
-    "gamma": (30, 55), "emg": (65, 100),
+    "theta": (4, 8),
+    "alpha": (8, 13),
+    "beta": (13, 30),
+    "gamma": (30, 55),
+    "emg": (65, 100),
 }
 
 
@@ -100,12 +113,16 @@ def filter_for_svm(data: np.ndarray) -> np.ndarray:
     window it saw during training (not the full 5s TRIAL_DUR+LEAD_IN window).
     Returns (n_channels, N_TIMEPOINTS) float64 array ready for bandpower extraction.
     """
-    data = data[:, -CONFIGS["N_TIMEPOINTS"]:]   # clip to 901 first — matches training
+    data = data[:, -CONFIGS["N_TIMEPOINTS"] :]  # clip to 901 first — matches training
     info = mne.create_info(ch_names=CH_NAMES, sfreq=CONFIGS["SFREQ"], ch_types="eeg")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
-        arr   = mne.filter.notch_filter(data[np.newaxis], Fs=CONFIGS["SFREQ"], freqs=60.0, verbose=False)
-        epoch = mne.EpochsArray(arr, info, events=np.array([[0, 0, 1]]), tmin=0, verbose=False)
+        arr = mne.filter.notch_filter(
+            data[np.newaxis], Fs=CONFIGS["SFREQ"], freqs=60.0, verbose=False
+        )
+        epoch = mne.EpochsArray(
+            arr, info, events=np.array([[0, 0, 1]]), tmin=0, verbose=False
+        )
         epoch.filter(13, 30.0, verbose=False)
         epoch.set_eeg_reference(ref_channels="average", projection=False, verbose=False)
     return epoch.get_data()[0]
@@ -119,8 +136,12 @@ def extract_bandpower_features(filtered: np.ndarray) -> np.ndarray:
     feats = []
     for c in range(filtered.shape[0]):
         psd, freqs = mne.time_frequency.psd_array_welch(
-            filtered[c][np.newaxis], sfreq=CONFIGS["SFREQ"],
-            fmin=1, fmax=150, n_fft=min(filtered.shape[1], 256), verbose=False,
+            filtered[c][np.newaxis],
+            sfreq=CONFIGS["SFREQ"],
+            fmin=1,
+            fmax=150,
+            n_fft=min(filtered.shape[1], 256),
+            verbose=False,
         )
         for lo, hi in _BP_BANDS.values():
             idx = (freqs >= lo) & (freqs <= hi)
@@ -202,7 +223,7 @@ def classifier_worker(shared_state):
     try:
         # SETUP
         model = load_model()
-        svm   = load_svm()
+        svm = load_svm()
         stream = attempt_LSL_connection(max_retries=10, retry_delay=2)
         if stream is None:
             raise RuntimeError(
@@ -231,6 +252,7 @@ def classifier_worker(shared_state):
         last_data = None
 
         # LOOP
+        pred_history = deque(maxlen=PREDICTION_WINDOW_LEN)
         while not shared_state.shutdown.is_set():
             t_start = time.perf_counter()
 
@@ -270,38 +292,47 @@ def classifier_worker(shared_state):
                 continue
 
             with torch.no_grad():
-                dl_out  = model(x)
+                dl_out = model(x)
                 dl_pred = dl_out.argmax(1).item()
                 dl_conf = dl_out[0, dl_pred].item()
 
             # ── SVM inference (jaw_clench) ────────────────────────────────────
-            filtered      = filter_for_svm(data)
-            feats         = extract_bandpower_features(filtered)
-            svm_pred_raw  = svm.predict(feats)[0]          # 0=idle, 1=jaw_clench
-            svm_conf      = svm.predict_proba(feats)[0][svm_pred_raw]
+            filtered = filter_for_svm(data)
+            feats = extract_bandpower_features(filtered)
+            svm_pred_raw = svm.predict(feats)[0]  # 0=idle, 1=jaw_clench
+            svm_conf = svm.predict_proba(feats)[0][svm_pred_raw]
 
             # ── Combine & decide ──────────────────────────────────────────────
             # move takes priority; jaw_clench only fires if move not confident
             if dl_pred == 1 and dl_conf >= MOVE_CONFIDENCE_THRESHOLD:
-                final_pred = 1   # move
+                final_pred = 1  # move
             elif svm_pred_raw == 1 and svm_conf >= JAW_CONFIDENCE_THRESHOLD:
-                final_pred = 2   # jaw_clench
+                final_pred = 2  # jaw_clench
             else:
-                final_pred = 0   # idle
+                final_pred = 0  # idle
 
-            dl_label  = "move"       if dl_pred == 1  else "other"
+            dl_label = "move" if dl_pred == 1 else "other"
             svm_label = "jaw_clench" if svm_pred_raw == 1 else "idle"
             final_label = LABEL_MAP[final_pred]
+
+            pred_history.append(final_pred)
+            consensus_pred = 0
+            for target_id in [1, 2]:
+                if pred_history.count(target_id) >= PREDICTION_THRESHOLD:
+                    consensus_pred = target_id
+                    break
+
             print(
                 f"[classifier_worker]  DL: {dl_label:<12} {dl_conf:.2f}"
                 f"  |  SVM: {svm_label:<12} {svm_conf:.2f}"
                 f"  →  {final_label}"
+                f"  | Winner: {LABEL_MAP[consensus_pred]}"
             )
 
             if not shared_state.demo_override.value:
-                shared_state.prediction.value = final_pred
+                shared_state.prediction.value = consensus_pred
                 shared_state.pred_confidence.value = float(
-                    dl_conf if final_pred == 1 else svm_conf
+                    dl_conf if consensus_pred == 1 else svm_conf
                 )
             # else: demo keyboard has control — don't overwrite
 

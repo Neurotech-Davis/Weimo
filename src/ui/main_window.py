@@ -183,6 +183,7 @@ class MainWindow(QMainWindow):
             "motor",
             "pathcam",
             "lidar",
+            "yolo",
         ]
 
         self._status_labels = {}
@@ -334,9 +335,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._annotation_label)
 
         return box
-
-
-
 
     # --- Mock / override classifier ---
 
@@ -537,17 +535,15 @@ class MainWindow(QMainWindow):
     def _build_pathfinding_group(self) -> QGroupBox:
         box, layout = self._make_group("Pathfinding")
 
-        self._vlm_label = QLabel("VLM: Waiting...")
-        self._vlm_label.setWordWrap(True)
-        self._vlm_label.setStyleSheet(
-            "font-family: monospace; font-size: 11px; color: #aaa;"
-        )
-        layout.addWidget(self._vlm_label)
-
         self._angle_dist_label = QLabel("→ --°  |  --mm")
-        self._obstacle_label = QLabel("Obstacle: --")
+        self._lidar_obstacle_label = QLabel("Obstacle: --")
+        self._yolo_obstacle_label = QLabel("Obstacle: --")
 
-        for lbl in (self._angle_dist_label, self._obstacle_label):
+        for lbl in (
+            self._angle_dist_label,
+            self._lidar_obstacle_label,
+            self._yolo_obstacle_label,
+        ):
             lbl.setStyleSheet("font-family: monospace; font-size: 12px;")
             layout.addWidget(lbl)
 
@@ -578,8 +574,8 @@ class MainWindow(QMainWindow):
         if not self.mock_classifier:
             self._update_classifier_readout()
         gaze_x, gaze_y = self.shared_state.get_gaze()
-        self._check_turn_zones(gaze_x, gaze_y) #added 2 lines
-        self._update_recording_status() 
+        self._check_turn_zones(gaze_x, gaze_y)  # added 2 lines
+        self._update_recording_status()
 
     def _update_feed(self):
         if self._active_feed == FEED_EYETRACKER:
@@ -682,7 +678,7 @@ class MainWindow(QMainWindow):
         )
 
         # front-cone highlight (345-15 deg)
-        obstacle = self.shared_state.obstacle_detected.value
+        obstacle = self.shared_state.lidar_obstacle_detected.value
         cone_fill = (0, 0, 60) if obstacle else (0, 40, 80)
         cone_border = (0, 0, 200) if obstacle else (0, 100, 200)
 
@@ -834,6 +830,7 @@ class MainWindow(QMainWindow):
             "motor": self.shared_state.motor_running.value,
             "pathcam": self.shared_state.pathcam_running.value,
             "lidar": self.shared_state.lidar_running.value,
+            "yolo": self.shared_state.yolo_running.value,
         }
         for name, label in self._status_labels.items():
             running = status_map.get(name, False)
@@ -879,20 +876,15 @@ class MainWindow(QMainWindow):
     def _update_pathfinding_readout(self):
         angle = self.shared_state.target_angle.value
         dist = self.shared_state.target_dist.value
-        obs = self.shared_state.obstacle_detected.value
+        lidar_obs = self.shared_state.lidar_obstacle_detected.value
+        yolo_obs = self.shared_state.yolo_obstacle_detected.value
         self._angle_dist_label.setText(f"→ {angle:+.1f}°  |  {dist:.0f}mm")
-        self._obstacle_label.setText(f"Obstacle: {'⚠ YES' if obs else 'clear'}")
-
-        verdict = self.shared_state.vlm_last_verdict.value.decode("utf-8")
-        if verdict:
-            self._vlm_label.setText(f"VLM: {verdict}")
-            if "OBSTACLE" in verdict.upper():
-                self._vlm_label.setStyleSheet("color: #ff4444; font-weight: bold;")
-            else:
-                self._vlm_label.setStyleSheet("color: #00cc66;")
-
-        if self.shared_state.vlm_is_busy.value:
-            self._vlm_label.setText("VLM: Analyzing path...")
+        self._lidar_obstacle_label.setText(
+            f"LIDAR Obstacle: {'! YES !' if lidar_obs else 'clear'}"
+        )
+        self._yolo_obstacle_label.setText(
+            f"YOLO Obstacle: {'! YES !' if yolo_obs else 'clear'}"
+        )
 
     def _check_turn_zones(self, gaze_x: float, gaze_y: float):
         """Check if gaze is dwelling in a turn zone."""
@@ -961,40 +953,42 @@ class MainWindow(QMainWindow):
 
     def _on_feedback_correct(self):
         """Mark the current prediction as correct in the recording."""
-        if hasattr(self.shared_state, 'feedback_correct'):
+        if hasattr(self.shared_state, "feedback_correct"):
             self.shared_state.feedback_correct.set()
         # Flash green briefly so user knows it registered
         self._btn_correct.setStyleSheet(
             "background: #00ff66; color: black; font-weight: bold; padding: 4px;"
         )
-        QTimer.singleShot(300, lambda: self._btn_correct.setStyleSheet(
-            "background: #1a6b3a; color: white; font-weight: bold; padding: 4px;"
-        ))
+        QTimer.singleShot(
+            300,
+            lambda: self._btn_correct.setStyleSheet(
+                "background: #1a6b3a; color: white; font-weight: bold; padding: 4px;"
+            ),
+        )
 
     def _on_feedback_wrong(self):
         """Mark the current prediction as wrong in the recording."""
-        if hasattr(self.shared_state, 'feedback_wrong'):
+        if hasattr(self.shared_state, "feedback_wrong"):
             self.shared_state.feedback_wrong.set()
         self._btn_wrong.setStyleSheet(
             "background: #ff4444; color: white; font-weight: bold; padding: 4px;"
         )
-        QTimer.singleShot(300, lambda: self._btn_wrong.setStyleSheet(
-            "background: #6b1a1a; color: white; font-weight: bold; padding: 4px;"
-        ))
-
-
-    
-
+        QTimer.singleShot(
+            300,
+            lambda: self._btn_wrong.setStyleSheet(
+                "background: #6b1a1a; color: white; font-weight: bold; padding: 4px;"
+            ),
+        )
 
     # Add this new method:
     def _update_recording_status(self):
         """Polls the recording state from shared_state and updates the label."""
-        if not hasattr(self.shared_state, 'recording_active'):
+        if not hasattr(self.shared_state, "recording_active"):
             return
 
-        active     = self.shared_state.recording_active.value
-        n_annots   = getattr(self.shared_state, 'annotation_count', None)
-        count      = n_annots.value if n_annots is not None else 0
+        active = self.shared_state.recording_active.value
+        n_annots = getattr(self.shared_state, "annotation_count", None)
+        count = n_annots.value if n_annots is not None else 0
 
         if active:
             self._recording_label.setText("● Recording: active")
@@ -1007,9 +1001,7 @@ class MainWindow(QMainWindow):
                 "font-family: monospace; font-size: 11px; color: #cc3333;"
             )
 
-        self._annotation_label.setText(f"Annotations: {count}")     
-
-    
+        self._annotation_label.setText(f"Annotations: {count}")
 
     # ------------------------------------------------------------------
     # Cleanup

@@ -92,7 +92,7 @@ class SharedState:
         ### -----------
         self.lidar_running = mp.Value(ctypes.c_bool, False)
         # LIDAR -> Motor
-        self.obstacle_detected = mp.Value(ctypes.c_bool, False)
+        self.lidar_obstacle_detected = mp.Value(ctypes.c_bool, False)
         self.lidar_dist = mp.Value(ctypes.c_float, float("inf"))
         self.lidar_distances = mp.Array(ctypes.c_float, 360)
 
@@ -100,32 +100,21 @@ class SharedState:
         ### YOLO
         ### -----------
         self.yolo_running = mp.Value(ctypes.c_bool, False)
-        self.mount_height = 300.0   # mm — update to actual hardware value
-        self.mount_angle  = 30.0    # degrees downward — update to actual hardware value
-
-        ### -----------
-        ### VLM Safety
-        ### -----------
-        self.vlm_running = mp.Value(ctypes.c_bool, False)
-        self.vlm_last_verdict = mp.Array(ctypes.c_char, 255) # Store response string
-        self.vlm_is_busy = mp.Value(ctypes.c_bool, False)
-        # To avoid double-triggering the same move
-        self.vlm_processed_dist = mp.Value(ctypes.c_float, 0.0)
-        # Add to your SharedState class __init__:
-        from multiprocessing import Value, Event
+        self.mount_height = 300.0  # mm — update to actual hardware value
+        self.mount_angle = 30.0  # degrees downward — update to actual hardware value
+        self.yolo_obstacle_detected = mp.Value(ctypes.c_bool, False)
 
         # Recording state
-        self.recording_active  = Value('b', False)
-        self.annotation_count  = Value('i', 0)
+        self.recording_active = mp.Value("b", False)
+        self.annotation_count = mp.Value("i", 0)
 
         # Feedback events — set by UI, cleared by classifier worker
-        self.feedback_correct  = Event()
-        self.feedback_wrong    = Event()
-        
+        self.feedback_correct = mp.Event()
+        self.feedback_wrong = mp.Event()
+
     def get_gaze(self) -> tuple:
         return self.gaze_x.value, self.gaze_y.value
 
     def set_gaze(self, x: float, y: float):
         self.gaze_x.value = x
         self.gaze_y.value = y
-

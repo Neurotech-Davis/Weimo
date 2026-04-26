@@ -107,7 +107,7 @@ def lidar_worker(shared_state):
             collision_imminent = any(
                 0 < local_buffer[i] < OBSTACLE_THRESHOLD_MM for i in front_indices
             )
-            shared_state.obstacle_detected.value = collision_imminent
+            shared_state.lidar_obstacle_detected.value = collision_imminent
 
             # debug: cardinal directions via +/-10 deg window
             n = window_min(local_buffer, 0)
