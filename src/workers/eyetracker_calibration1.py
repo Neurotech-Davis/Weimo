@@ -1,7 +1,12 @@
 # calibrate.py
 import time
 import json
+import sys
 from pathlib import Path
+
+from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtGui import QPainter, QColor, QFont
+from PyQt6.QtCore import Qt
 
 import cv2
 import numpy as np
@@ -9,12 +14,16 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-# ── paths (same as your worker) ──────────────────────────────────────────────
+# Loading model
 models_dir = Path(__file__).parent.parent / "models"
 model_path = str(models_dir / "face_landmarker.task")
-cam_matrix = np.load(models_dir / "intrinsic_built-in.npy")
-cam_matrix_new = np.load(models_dir / "intrinsicNew_built-in.npy")
-dist = np.load(models_dir / "dist_built-in.npy")
+# Loading camera correction matrices
+cam_matrix_builtin = np.load(models_dir / "intrinsic_built-in.npy")
+cam_matrix_new_builtin = np.load(models_dir / "intrinsicNew_built-in.npy")
+dist_builtin = np.load(models_dir / "dist_built-in.npy")
+cam_matrix_usb = np.load(models_dir / "intrinsic_usb.npy")
+cam_matrix_new_usb = np.load(models_dir / "intrinsicNew_usb.npy")
+dist_usb = np.load(models_dir / "dist_usb.npy")
 
 CALIBRATIONS_DIR = Path(__file__).parent.parent / "calibrations"
 CALIBRATIONS_DIR.mkdir(exist_ok=True)
@@ -33,13 +42,21 @@ model_points = np.array(
     dtype="double",
 )
 
+on_linux = "--linux" in sys.argv
 N_CALIBRATION_FRAMES = 90  # ~3 seconds at 30fps
-CAMERA_INDEX = 0
+CAMERA_INDEX = 64 if on_linux else 0
 W, H = 640, 480
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def collect_center_offset(user_id: str):
+def get_correct_matrices(index):
+    # returns K, K_new, dist
+    if index == 0:
+        return cam_matrix_builtin, cam_matrix_new_builtin, dist_builtin
+    return cam_matrix_usb, cam_matrix_new_usb, dist_usb
+
+
+def collect_center_offset(user_id: str, app):
     # ── landmarker setup ──────────────────────────────────────────────────────
     options = vision.FaceLandmarkerOptions(
         base_options=python.BaseOptions(model_asset_path=model_path),
@@ -51,7 +68,11 @@ def collect_center_offset(user_id: str):
     landmarker = vision.FaceLandmarker.create_from_options(options)
 
     # ── camera setup ─────────────────────────────────────────────────────────
-    cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_DSHOW)  # swap to CAP_V4L2 on linux
+    BACKEND = cv2.CAP_V4L2 if on_linux else cv2.CAP_DSHOW
+    cap = cv2.VideoCapture(CAMERA_INDEX, BACKEND)  # swap to CAP_V4L2 on linux
+
+    cam_matrix, cam_matrix_new, dist = get_correct_matrices(CAMERA_INDEX)
+
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, W)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, H)
 
@@ -119,6 +140,7 @@ def collect_center_offset(user_id: str):
         cv2.imshow("Calibration", undistorted)
         cv2.waitKey(1)
         print(f"\r[{bar:<20}] {n}/{N_CALIBRATION_FRAMES}", end="", flush=True)
+        app.processEvents()
 
     cap.release()
     landmarker.close()
@@ -150,8 +172,55 @@ def collect_center_offset(user_id: str):
     return out
 
 
+def show_calibration_target():
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    class CalibrationTarget(QWidget):
+        def __init__(self):
+            super().__init__()
+            self.setWindowFlags(
+                Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
+            )
+            self.showFullScreen()
+
+        def paintEvent(self, event):
+            painter = QPainter(self)
+            painter.fillRect(self.rect(), QColor("black"))
+
+            cx, cy = self.width() // 2, self.height() // 2
+            r = 20
+            painter.setBrush(QColor("red"))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(cx - r, cy - r, r * 2, r * 2)
+
+            painter.setPen(QColor("white"))
+            painter.setFont(QFont("Arial", 24))
+            painter.drawText(
+                0,
+                cy + 60,
+                self.width(),
+                40,
+                Qt.AlignmentFlag.AlignHCenter,
+                "Look at the dot, hold still",
+            )
+
+        def keyPressEvent(self, event):
+            if event.key() == Qt.Key.Key_Escape:
+                self.close()
+
+    window = CalibrationTarget()
+    window.show()
+    app.processEvents()  # render immediately without blocking
+    return window, app
+
+
 if __name__ == "__main__":
     import sys
 
     uid = sys.argv[1] if len(sys.argv) > 1 else "default"
-    collect_center_offset(uid)
+
+    target, app = show_calibration_target()
+    app.processEvents()
+
+    collect_center_offset(uid, app)
+    target.close()

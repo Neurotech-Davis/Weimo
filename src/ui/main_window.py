@@ -493,7 +493,7 @@ class MainWindow(QMainWindow):
         if key == Qt.Key.Key_M:
             self._demo_mode_btn.setChecked(not self._demo_mode_btn.isChecked())
             self._toggle_demo_override()
-        
+
         # If the manual override toggle is ON, check for movement keys
         elif self.shared_state.demo_override.value:
             if key == Qt.Key.Key_Comma:
@@ -502,33 +502,41 @@ class MainWindow(QMainWindow):
                 self._demo_idle()
             elif key == Qt.Key.Key_Slash:
                 self._demo_jaw_clench()
-                
+
         super().keyPressEvent(event)
 
     # --- Motor controls ---
 
     def _build_motor_group(self) -> QGroupBox:
-        box, layout = self._make_group("Motor")
+        box = QGroupBox("Motor")
+        grid = QGridLayout(box)
+        grid.setContentsMargins(6, 4, 6, 4)
+        grid.setSpacing(4)
 
-        self._motor_state_label = QLabel("State: --")
+        self._motor_state_label = QLabel("State: IDLE")
         self._motor_state_label.setStyleSheet(
             "font-family: monospace; font-size: 13px;"
         )
-        layout.addWidget(self._motor_state_label)
+        grid.addWidget(self._motor_state_label, 0, 0)
 
         self._target_label = QLabel("Target: --")
         self._target_label.setStyleSheet(
             "font-family: monospace; font-size: 12px; color: #888;"
         )
-        layout.addWidget(self._target_label)
+        grid.addWidget(self._target_label, 1, 0)
 
-        self._btn_stop = QPushButton("⬛ EMERGENCY STOP")
+        self._btn_stop = QPushButton("⬛ STOP")
         self._btn_stop.setStyleSheet(
-            "background: #cc3333; color: white; font-weight: bold; "
-            "font-size: 14px; padding: 8px;"
+            "background: #cc3333; color: white; font-weight: bold; padding: 4px 8px;"
         )
         self._btn_stop.clicked.connect(lambda: self._send_motor_command(1))
-        layout.addWidget(self._btn_stop)
+        self._btn_stop.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding
+        )
+        grid.addWidget(self._btn_stop, 0, 1, 2, 1)  # span 2 rows, 1 col
+
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 0)
 
         return box
 
@@ -538,14 +546,9 @@ class MainWindow(QMainWindow):
         box, layout = self._make_group("Pathfinding")
 
         self._angle_dist_label = QLabel("→ --°  |  --mm")
-        self._lidar_obstacle_label = QLabel("Obstacle: --")
-        self._yolo_obstacle_label = QLabel("Obstacle: --")
+        self._obstacle_label = QLabel("Obs: --  |  --")
 
-        for lbl in (
-            self._angle_dist_label,
-            self._lidar_obstacle_label,
-            self._yolo_obstacle_label,
-        ):
+        for lbl in (self._angle_dist_label, self._obstacle_label):
             lbl.setStyleSheet("font-family: monospace; font-size: 12px;")
             layout.addWidget(lbl)
 
@@ -881,11 +884,8 @@ class MainWindow(QMainWindow):
         lidar_obs = self.shared_state.lidar_obstacle_detected.value
         yolo_obs = self.shared_state.yolo_obstacle_detected.value
         self._angle_dist_label.setText(f"→ {angle:+.1f}°  |  {dist:.0f}mm")
-        self._lidar_obstacle_label.setText(
-            f"LIDAR Obstacle: {'! YES !' if lidar_obs else 'clear'}"
-        )
-        self._yolo_obstacle_label.setText(
-            f"YOLO Obstacle: {'! YES !' if yolo_obs else 'clear'}"
+        self._obstacle_label.setText(
+            f"Obs: LIDAR {'!!!' if lidar_obs else 'ok'}  |  YOLO {'!!!' if yolo_obs else 'ok'}"
         )
 
     def _check_turn_zones(self, gaze_x: float, gaze_y: float):

@@ -121,7 +121,7 @@ def yolo_worker(shared_state):
                     break
 
             shared_state.yolo_obstacle_detected.value = obstacle
-            print(f"[yolo_worker] {'OBSTACLE' if obstacle else 'clear'}")
+            # print(f"[yolo_worker] {'OBSTACLE' if obstacle else 'clear'}")
 
     except Exception as e:
         print(f"[yolo_worker] Fatal error: {e}")
@@ -133,8 +133,8 @@ def yolo_worker(shared_state):
 
 if __name__ == "__main__":
     W, H = 640, 480
-    MOUNT_HEIGHT_TEST = 300.0  # mm — adjust to match your setup
-    MOUNT_ANGLE_TEST = 30.0  # degrees downward — adjust to match your setup
+    MOUNT_HEIGHT_TEST = 118  # mm — adjust to match your setup
+    MOUNT_ANGLE_TEST = 9.7  # degrees downward — adjust to match your setup
 
     K = _load_K("built-in")
     path_mask = _build_path_mask(W, H, K, MOUNT_HEIGHT_TEST, MOUNT_ANGLE_TEST)
@@ -144,7 +144,7 @@ if __name__ == "__main__":
     mask_overlay = np.zeros((H, W, 3), dtype=np.uint8)
     mask_overlay[path_mask == 1] = (0, 255, 0)
 
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(64)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, W)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, H)
 

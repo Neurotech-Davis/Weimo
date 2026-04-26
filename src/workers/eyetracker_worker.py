@@ -40,6 +40,7 @@ PITCH_OFFSET = 0  # Adjust if cursor is too high/low when looking center
 YAW_OFFSET = 0
 # Define this so that the correct matrix is loaded
 BUILTIN_CAMERA_INDEX = 0
+IMAGE_POINT_SMOOTHING = False
 
 
 def get_correct_matrices(index):
@@ -50,9 +51,7 @@ def get_correct_matrices(index):
 
 
 def load_offsets(name):
-    cal_path = (
-        Path(__file__).parent.parent / "calibrations" / f"{shared_state.user_id}.json"
-    )
+    cal_path = Path(__file__).parent.parent / "calibrations" / f"{name}.json"
     if cal_path.exists():
         cal = json.loads(cal_path.read_text())
         PITCH_OFFSET = cal["pitch_offset"]
@@ -68,7 +67,7 @@ def eyetracker_worker(shared_state):
     # SETUP
     shared_state.tracker_running.value = True
 
-    load_offsets("chengyi")
+    load_offsets("noone")
 
     options = FaceLandmarkerOptions(
         base_options=python.BaseOptions(model_asset_path=model_path),
@@ -96,6 +95,8 @@ def eyetracker_worker(shared_state):
         return cap, map1, map2, K_new
 
     cap, map1, map2, K_new = open_camera(CAMERA_INDEX)
+    prev_image_points = None
+    LANDMARK_SMOOTHING = 0.4
 
     # LOOP
     try:
@@ -141,13 +142,17 @@ def eyetracker_worker(shared_state):
                     dtype="double",
                 )
 
-                # 2. Estimate Head Pose (PnP)
-                # focal_length = w
-                # cam_matrix = np.array(
-                #     [[focal_length, 0, w / 2], [0, focal_length, h / 2], [0, 0, 1]],
-                #     dtype="double",
-                # )
+                # This slowly corrects image points per user
+                if IMAGE_POINT_SMOOTHING:
+                    if prev_image_points is None:
+                        prev_image_points = image_points
+                    prev_image_points = (
+                        prev_image_points
+                        + (image_points - prev_image_points) * LANDMARK_SMOOTHING
+                    )
+                    image_points = prev_image_points
 
+                # 2. Estimate Head Pose (PnP)
                 # success_flag, rot_vec, trans_vec
                 _, rot_vec, _ = cv2.solvePnP(model_points, image_points, K_new, None)
 

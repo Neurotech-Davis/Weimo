@@ -100,8 +100,8 @@ class SharedState:
         ### YOLO
         ### -----------
         self.yolo_running = mp.Value(ctypes.c_bool, False)
-        self.mount_height = 300.0  # mm — update to actual hardware value
-        self.mount_angle = 30.0  # degrees downward — update to actual hardware value
+        self.mount_height = 118  # mm — update to actual hardware value
+        self.mount_angle = 9.7  # degrees downward — update to actual hardware value
         self.yolo_obstacle_detected = mp.Value(ctypes.c_bool, False)
 
         # Recording state
