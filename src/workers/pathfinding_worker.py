@@ -1,3 +1,4 @@
+from multiprocessing import get_all_start_methods
 from pathlib import Path
 import time
 import sys
@@ -14,6 +15,16 @@ models_dir = Path(__file__).parent.parent / "models"
 cam_matrix_usb = np.load(models_dir / "intrinsic_usb.npy")
 cam_matrix_new_usb = np.load(models_dir / "intrinsicNew_usb.npy")
 dist_usb = np.load(models_dir / "dist_usb.npy")
+
+
+X_GUTTER = 0.20  # 15% on each side for UI + 5% margin
+Y_GUTTER = 0.30  # 25% for top/bottom button height + 5% margin
+
+
+def is_gaze_in_ui(gx, gy):
+    x_in_gutter = gx <= X_GUTTER or gx >= (1.0 - X_GUTTER)
+    y_in_gutter = gy <= Y_GUTTER or gy >= (1.0 - Y_GUTTER)
+    return x_in_gutter and y_in_gutter
 
 
 def load_calibration():
@@ -41,8 +52,9 @@ def pathfinding_worker(shared_state):
         # LOOP
         while not shared_state.shutdown.is_set():
             gaze_x, gaze_y = shared_state.get_gaze()
+            gaze_in_ui = is_gaze_in_ui(gaze_x, gaze_y)
 
-            if gaze_x >= 0 and gaze_y >= 0:
+            if gaze_x >= 0 and gaze_y >= 0 and not gaze_in_ui:
                 px = int(gaze_x * img_w)
                 py = int(gaze_y * img_h)
                 # then physical trig

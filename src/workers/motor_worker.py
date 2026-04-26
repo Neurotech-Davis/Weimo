@@ -26,6 +26,9 @@ MOVE_CONFIDENCE_THRESHOLD = 0.95
 DIST_THRESHOLD_MM = 150
 ANGLE_THRESHOLD_DEG = 10.0
 
+LIDAR_STOP = True
+YOLO_STOP = True
+
 
 class MotorState(Enum):
     IDLE = "idle"
@@ -35,10 +38,24 @@ class MotorState(Enum):
 # ── Serial helpers ────────────────────────────────────────────────────────────
 
 
+def force_pico_reset(ser):
+    """Sends Ctrl+C to break hangs and Ctrl+D to soft-reboot the Pico."""
+    print("[motor_worker] Initializing Pico state...")
+    ser.write(b"\x03")  # Ctrl+C (Interrupt any running code/REPL)
+    time.sleep(0.1)
+    ser.write(b"\x03")  # Second Ctrl+C just in case
+    time.sleep(0.1)
+    ser.write(b"\x04")  # Ctrl+D (Soft Reboot)
+    time.sleep(1.5)  # Wait for MicroPython to reboot and run main.py
+    ser.reset_input_buffer()
+    print("[motor_worker] Pico ready.")
+
+
 def connect(port: str, baud: int, retries: int = 5) -> serial.Serial:
     for attempt in range(1, retries + 1):
         try:
             ser = serial.Serial(port, baud, timeout=1)
+            # force_pico_reset(ser)
             print(f"[motor_worker] connected to {port} on attempt {attempt}")
             return ser
         except serial.SerialException as e:
@@ -47,15 +64,62 @@ def connect(port: str, baud: int, retries: int = 5) -> serial.Serial:
     raise RuntimeError(f"[motor_worker] could not open {port} after {retries} attempts")
 
 
+# def send(ser, cmd, shared_state=None):
+#     try:
+#         ser.write((cmd + "\n").encode())
+#     except (serial.SerialException, OSError) as e:
+#         print(f"[motor_worker] Write failure: {e}. Attempting recovery...")
+#         force_pico_reset(ser)
+#         return "OK:STOPPED"  # Fail safe
+#
+#     deadline = time.time() + 30.0
+#     while time.time() < deadline:
+#         if shared_state is not None:
+#             if shared_state.motor_command.value != 0 or jaw_clench_detected(
+#                 shared_state
+#             ):
+#                 ser.write(b"STOP\n")
+#                 ser.flush()
+#                 # ... rest of your drain logic ...
+#                 return "OK:STOPPED"
+#
+#         try:
+#             line = ser.readline().decode().strip()
+#         except (serial.SerialException, OSError):
+#             print("[motor_worker] Read failure during command. Resetting...")
+#             force_pico_reset(ser)
+#             return "OK:STOPPED"
+#
+#         if line in ("OK:DONE", "OK:STOPPED"):
+#             return line
+#         elif line:
+#             print(f"[pico] {line}")
+#
+#     return ""
+
+
 def send(ser, cmd, shared_state=None):
     ser.write((cmd + "\n").encode())
+    is_drive_cmd = cmd.startswith("DRIVE")
+
     deadline = time.time() + 30.0
     while time.time() < deadline:
         # check for interrupt before blocking on readline
         if shared_state is not None:
-            if shared_state.motor_command.value != 0 or jaw_clench_detected(
-                shared_state
+            obstacle_blocking = is_drive_cmd and obstacle_detected(
+                shared_state, LIDAR_STOP, YOLO_STOP
+            )
+
+            if (
+                shared_state.motor_command.value != 0
+                or jaw_clench_detected(shared_state)
+                or obstacle_blocking
             ):
+                if obstacle_blocking:
+                    print(
+                        f"[motor_worker] Obstacle interrupt during DRIVE: | LiDAR: {shared_state.lidar_obstacle_detected} | YOLO: {shared_state.yolo_obstacle_detected}"
+                    )
+
                 ser.write(b"STOP\n")
                 ser.flush()
                 # drain until we get OK:STOPPED
@@ -68,6 +132,8 @@ def send(ser, cmd, shared_state=None):
         line = ser.readline().decode().strip()
         if line in ("OK:DONE", "OK:STOPPED"):
             return line
+        elif line:
+            print(f"[pico] {line}")  # add this
     return ""
 
 
@@ -90,6 +156,15 @@ def cmd_stop_immediate(ser):
 
 
 # ── Jaw clench check — call between blocking operations ───────────────────────
+
+
+def obstacle_detected(shared_state, lidar_stop=True, yolo_stop=True):
+    emergency_stop = False
+    if lidar_stop:
+        emergency_stop = emergency_stop or shared_state.lidar_obstacle_detected
+    if yolo_stop:
+        emergency_stop = emergency_stop or shared_state.yolo_obstacle_detected
+    return emergency_stop
 
 
 def jaw_clench_detected(shared_state) -> bool:
@@ -178,7 +253,7 @@ def motor_worker(shared_state):
                 state = MotorState.DRIVING
                 shared_state.motor_state.value = 1
                 print(f"[motor_worker] IDLE → DRIVING (zone turn {turn_deg}°)")
-                cmd_turn(ser, turn_deg)
+                cmd_turn(ser, turn_deg, shared_state)
                 state = MotorState.IDLE
                 shared_state.motor_state.value = 0
                 print(f"[motor_worker] DRIVING → IDLE (turn complete)")
@@ -227,6 +302,8 @@ def motor_worker(shared_state):
 # ── Manual test ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    PICO_PORT = "/dev/ttyACM0"
+
     print("=== Motor Worker Manual Test ===")
     print(f"Connecting to {PICO_PORT} at {BAUD_RATE} baud...")
 
