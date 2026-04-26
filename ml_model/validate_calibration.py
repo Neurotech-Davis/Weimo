@@ -45,7 +45,6 @@ EEG_EXCLUDE  = {"Trigger", "Event"}
 SFREQ        = 300
 N_TIMEPOINTS = int(SFREQ * 3.0) + 1     # 901 samples — tmax=3.0 inclusive in MNE
 VAL_WINDOW   = 4.0                       # seconds of EEG to check per validation event
-STRIDE_SEC   = 1.0                       # stride for sliding inference windows
 
 
 # ── Per-epoch preprocessing (matches classifier_worker.preprocess_epoch) ───────
@@ -108,6 +107,10 @@ def parse_args():
                    help="Fine-tuning epochs (default: 20)")
     p.add_argument("--lr",              type=float, default=1e-3,
                    help="Learning rate (default: 1e-3)")
+    p.add_argument("--stride",          type=float, default=1.0,
+                   help="Sliding window stride in seconds (default: 1.0)")
+    p.add_argument("--concurrent",      type=int,   default=1,
+                   help="Consecutive correct predictions required to count as detected (default: 1)")
     p.add_argument("--fif",             type=str,   default=DEFAULT_FIF,
                    help="Path to annotated FIF file")
     return p.parse_args()
@@ -128,6 +131,8 @@ def main():
         print(f"  Calibration:     first {args.n_calib} annotations")
         print(f"  Unfreeze blocks: {args.unfreeze_blocks}")
         print(f"  Train epochs:    {args.train_epochs}  lr={args.lr}")
+    print(f"  Stride:          {args.stride}s")
+    print(f"  Concurrent:      {args.concurrent}")
     print("=" * 60)
 
     raw     = mne.io.read_raw_fif(args.fif, preload=True, verbose=False)
@@ -192,7 +197,7 @@ def main():
         tracked = {"move", "jaw_clench"}
         results = {lbl: {"correct": 0, "total": 0} for lbl in tracked}
 
-        stride_samps = int(STRIDE_SEC * sfreq)
+        stride_samps = int(args.stride * sfreq)
         move_class   = LABEL_MAP["move"]   # 1
 
         print(f"\n[Step 5] Validating {sum(1 for a in val_anns if a['description'] in tracked)} "
@@ -212,9 +217,8 @@ def main():
             correct = False
 
             if label == "move":
-                # Slide a 3s window (1s stride) across the 4s event window.
-                # Correct if model predicts class 1 at any position.
-                n_samps = data.shape[1]
+                n_samps     = data.shape[1]
+                consecutive = 0
                 for w0 in range(0, n_samps - N_TIMEPOINTS + 1, stride_samps):
                     window = data[:, w0: w0 + N_TIMEPOINTS]
                     x      = _preprocess_epoch(window, eeg_chs)
@@ -222,17 +226,24 @@ def main():
                         out  = model(x)
                         pred = out.argmax(1).item()
                     if pred == move_class:
-                        correct = True
-                        break
+                        consecutive += 1
+                        if consecutive >= args.concurrent:
+                            correct = True
+                            break
+                    else:
+                        consecutive = 0
 
             elif label == "jaw_clench":
-                # Slide a window matching the size used to build the threshold.
-                # Passing the full 4s window dilutes clench energy and misses detections.
-                win_samps = int(WINDOW_SEC * sfreq)
-                for w0 in range(0, data.shape[1] - win_samps + 1, win_samps):
+                win_samps   = int(WINDOW_SEC * sfreq)
+                consecutive = 0
+                for w0 in range(0, data.shape[1] - win_samps + 1, stride_samps):
                     if detect(data[:, w0: w0 + win_samps], baseline):
-                        correct = True
-                        break
+                        consecutive += 1
+                        if consecutive >= args.concurrent:
+                            correct = True
+                            break
+                    else:
+                        consecutive = 0
 
             results[label]["correct"] += int(correct)
             mark = "✓" if correct else "✗"
