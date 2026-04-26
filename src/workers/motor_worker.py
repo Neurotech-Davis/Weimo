@@ -205,6 +205,27 @@ def navigate_to(ser, h_angle: float, dist_mm: float, shared_state) -> bool:
     return True
 
 
+def process_ui_turn_logic(ser, shared_state) -> bool:
+    """
+    Checks for a pending turn command from the UI.
+    Returns True if a turn was executed, False otherwise.
+    """
+    turn_deg = shared_state.turn_command.value
+    if turn_deg != 0.0:
+        # Consume immediately to prevent double-triggering
+        shared_state.turn_command.value = 0.0
+
+        print(f"[motor_worker] Executing UI Zone Turn: {turn_deg}°")
+        shared_state.motor_state.value = 1  # Update UI label to "DRIVING"
+
+        # Execute the blocking serial command
+        cmd_turn(ser, turn_deg, shared_state)
+        shared_state.motor_state.value = 0  # Return to "IDLE"
+
+        return True
+    return False
+
+
 # ── Worker ────────────────────────────────────────────────────────────────────
 
 
@@ -235,6 +256,10 @@ def motor_worker(shared_state):
                 time.sleep(0.05)
                 continue
 
+            if not shared_state.tracker_running:
+                time.sleep(2)
+                continue
+
             # ── jaw clench emergency stop ──
             if jaw_clench_detected(shared_state):
                 if state == MotorState.DRIVING:
@@ -246,42 +271,35 @@ def motor_worker(shared_state):
                 time.sleep(0.05)
                 continue
 
-            # ── turn zone command ──
-            turn_deg = shared_state.turn_command.value
-            if state == MotorState.IDLE and turn_deg != 0.0:
-                shared_state.turn_command.value = 0.0  # consume immediately
-                state = MotorState.DRIVING
-                shared_state.motor_state.value = 1
-                print(f"[motor_worker] IDLE → DRIVING (zone turn {turn_deg}°)")
-                cmd_turn(ser, turn_deg, shared_state)
-                state = MotorState.IDLE
-                shared_state.motor_state.value = 0
-                print(f"[motor_worker] DRIVING → IDLE (turn complete)")
-                continue
-
             # ── state machine ──
             if state == MotorState.IDLE:
+                # this handles the UI turn if its available
+                if process_ui_turn_logic(ser, shared_state):
+                    continue
+
                 pred = shared_state.prediction.value
                 conf = shared_state.pred_confidence.value
+                dist = shared_state.target_dist.value
 
                 if pred == 1 and conf >= MOVE_CONFIDENCE_THRESHOLD:
-                    # latch target at moment of move prediction
-                    h_angle = shared_state.target_angle.value
-                    dist = shared_state.target_dist.value
-                    shared_state.prediction.value = 0  # consume
-
                     if dist > DIST_THRESHOLD_MM:
+                        # latch target at moment of move prediction
+                        shared_state.prediction.value = 0  # consume
+                        h_angle = shared_state.target_angle.value
+
                         state = MotorState.DRIVING
                         shared_state.motor_state.value = 1
                         print(f"[motor_worker] IDLE → DRIVING")
-
                         arrived = navigate_to(ser, h_angle, dist, shared_state)
 
                         state = MotorState.IDLE
                         shared_state.motor_state.value = 0
                         print(f"[motor_worker] DRIVING → IDLE  (arrived={arrived})")
                     else:
-                        print("[motor_worker] target too close, ignoring")
+                        # this should hand the command to the UI
+                        print(
+                            "[motor_worker] target too close, ignoring. Handing off to UI?"
+                        )
 
             elapsed = time.perf_counter() - t_start
             time.sleep(max(0.0, 0.05 - elapsed))
