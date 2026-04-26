@@ -43,8 +43,9 @@ CONFIGS["N_TIMEPOINTS"] = (
     int(CONFIGS["SFREQ"] * CONFIGS["TRIAL_DUR"]) + 1
 )  # MNE tmax inclusive → 901
 
-MODEL_PATH = "./models/DeepConvNet_per_epoch.pt"
-SVM_MODEL_PATH = "./models/SVM_linear__beta__bandpower.pkl"
+_MODELS_DIR    = os.path.join(os.path.dirname(__file__), "..", "models")
+MODEL_PATH     = os.path.join(_MODELS_DIR, "DeepConvNet_per_epoch.pt")
+SVM_MODEL_PATH = os.path.join(_MODELS_DIR, "SVM_linear__beta__bandpower.pkl")
 STREAM_NAME = "WS-default"
 
 CH_NAMES = [
@@ -91,6 +92,7 @@ def preprocess_epoch(data: np.ndarray) -> torch.Tensor:
         "EEG F3-Pz",
         "Pz",
     ]
+    data = data[:, -CONFIGS["N_TIMEPOINTS"]:]  # clip before filtering — matches epoch_filter in training
     info = mne.create_info(ch_names=ch_names, sfreq=CONFIGS["SFREQ"], ch_types="eeg")
     raw = mne.io.RawArray(data.astype(np.float64), info, verbose=False)
 
@@ -98,7 +100,7 @@ def preprocess_epoch(data: np.ndarray) -> torch.Tensor:
     raw.filter(13, 30.0, verbose=False)
     raw.set_eeg_reference(ref_channels="average", verbose=False)
 
-    X = raw.get_data()[:, -CONFIGS["N_TIMEPOINTS"] :]  # clip to exactly 900
+    X = raw.get_data()
     mean = X.mean(axis=-1, keepdims=True)
     std = X.std(axis=-1, keepdims=True) + 1e-8
     X = (X - mean) / std
@@ -303,10 +305,10 @@ def classifier_worker(shared_state):
             svm_conf = svm.predict_proba(feats)[0][svm_pred_raw]
 
             # ── Combine & decide ──────────────────────────────────────────────
-            # move takes priority; jaw_clench only fires if move not confident
-            if dl_pred == 1 and dl_conf >= MOVE_CONFIDENCE_THRESHOLD:
+            # raw argmax, no confidence gate — consensus window handles filtering
+            if dl_pred == 1:
                 final_pred = 1  # move
-            elif svm_pred_raw == 1 and svm_conf >= JAW_CONFIDENCE_THRESHOLD:
+            elif svm_pred_raw == 1:
                 final_pred = 2  # jaw_clench
             else:
                 final_pred = 0  # idle
