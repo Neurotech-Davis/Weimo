@@ -18,9 +18,11 @@ Usage:
 
 import os
 import sys
+import pickle
 import argparse
 import tempfile
 import warnings
+from collections import deque
 from types import SimpleNamespace
 
 import numpy as np
@@ -40,11 +42,16 @@ from processing.preprocess_pipeline import add_idle_class
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-DEFAULT_FIF  = os.path.join(ROOT, "data_collection", "annotated_fifs", "chengyi_4_21_1.fif")
+DEFAULT_FIF      = os.path.join(ROOT, "data_collection", "annotated_fifs", "chengyi_4_21_1.fif")
+DEFAULT_JAW_SVM  = os.path.join(ROOT, "ml_model", "loso_classical_models",
+                                 "jaw_clench", "SVM_linear__alpha__bandpower.pkl")
 EEG_EXCLUDE  = {"Trigger", "Event"}
 SFREQ        = 300
 N_TIMEPOINTS = int(SFREQ * 3.0) + 1     # 901 samples — tmax=3.0 inclusive in MNE
 VAL_WINDOW   = 4.0                       # seconds of EEG to check per validation event
+
+_BP_BANDS = {"theta": (4, 8), "alpha": (8, 13), "beta": (13, 30),
+             "gamma": (30, 55), "emg": (65, 100)}
 
 
 # ── Per-epoch preprocessing (matches classifier_worker.preprocess_epoch) ───────
@@ -66,6 +73,50 @@ def _preprocess_epoch(data: np.ndarray, ch_names: list) -> torch.Tensor:
     std  = X.std(axis=-1, keepdims=True) + 1e-8
     X    = (X - mean) / std
     return torch.from_numpy(X).float().unsqueeze(0).unsqueeze(0)
+
+
+# ── Jaw-clench SVM feature extraction ────────────────────────────────────────
+
+
+def _jaw_svm_features(data: np.ndarray, ch_names: list) -> np.ndarray:
+    """Alpha bandpass → bandpower features for the jaw-clench SVM.
+
+    Matches the training pipeline: bandpass [8-13 Hz], extract_bandpower
+    (5 bands × n_channels log-mean power). Returns (1, n_features) float32.
+    """
+    data  = data[:, -N_TIMEPOINTS:]
+    info  = mne.create_info(ch_names=ch_names, sfreq=SFREQ, ch_types="eeg")
+    epoch = mne.EpochsArray(data[np.newaxis], info,
+                            events=np.array([[0, 0, 1]]), tmin=0, verbose=False)
+    epoch.filter(8.0, 13.0, verbose=False)
+    filtered = epoch.get_data()[0]   # (n_ch, n_times)
+    feats = []
+    for c in range(filtered.shape[0]):
+        psd, freqs = mne.time_frequency.psd_array_welch(
+            filtered[c][np.newaxis], sfreq=SFREQ,
+            fmin=1, fmax=150, n_fft=min(filtered.shape[1], 256), verbose=False,
+        )
+        for lo, hi in _BP_BANDS.values():
+            idx = (freqs >= lo) & (freqs <= hi)
+            feats.append(float(np.log(psd[0, idx].mean() + 1e-10)))
+    return np.array(feats, dtype=np.float32).reshape(1, -1)
+
+
+# ── Idle window finder ────────────────────────────────────────────────────────
+
+
+def _find_idle_onsets(all_anns: list, start_t: float, end_t: float,
+                      window_dur: float, stride: float) -> list:
+    """Return onset times for non-overlapping windows that don't touch any annotation."""
+    busy = [(a["onset"], a["onset"] + float(a["duration"]) + window_dur)
+            for a in all_anns]
+    onsets = []
+    t = start_t
+    while t + window_dur <= end_t:
+        if not any(not (t + window_dur <= b0 or t >= b1) for b0, b1 in busy):
+            onsets.append(t)
+        t += stride
+    return onsets
 
 
 # ── Calibration FIF builder ────────────────────────────────────────────────────
@@ -107,10 +158,20 @@ def parse_args():
                    help="Fine-tuning epochs (default: 20)")
     p.add_argument("--lr",              type=float, default=1e-3,
                    help="Learning rate (default: 1e-3)")
+    p.add_argument("--weight-decay",    type=float, default=0.0,
+                   help="L2 weight decay for Adam (default: 0.0)")
     p.add_argument("--stride",          type=float, default=1.0,
                    help="Sliding window stride in seconds (default: 1.0)")
     p.add_argument("--concurrent",      type=int,   default=1,
-                   help="Consecutive correct predictions required to count as detected (default: 1)")
+                   help="Consecutive correct predictions required (default: 1)")
+    p.add_argument("--ratio-hits",      type=int,   default=None,
+                   help="Hits needed in a rolling window to count as detected (e.g. 3)")
+    p.add_argument("--ratio-window",    type=int,   default=4,
+                   help="Rolling window size for --ratio-hits (default: 4)")
+    p.add_argument("--svm-jaw-clench",  action="store_true",
+                   help="Use SVM classifier for jaw clench instead of threshold detector")
+    p.add_argument("--jaw-svm-path",   type=str,   default=DEFAULT_JAW_SVM,
+                   help="Path to jaw-clench SVM .pkl (default: SVM_linear__alpha__bandpower.pkl)")
     p.add_argument("--fif",             type=str,   default=DEFAULT_FIF,
                    help="Path to annotated FIF file")
     return p.parse_args()
@@ -177,6 +238,7 @@ def main():
                 unfreeze_blocks=args.unfreeze_blocks,
                 train_epochs=args.train_epochs,
                 lr=args.lr,
+                weight_decay=args.weight_decay,
             )
             X, y            = run_preprocessing(calib_fif)
             used_model_path = run_finetuning(X, y, ft_args)
@@ -193,9 +255,17 @@ def main():
         model.eval()
         print(f"[validate] Loaded model: {os.path.basename(used_model_path)}")
 
+        # ── Step 4b: Load jaw-clench SVM (optional) ───────────────────────────
+        jaw_svm = None
+        if args.svm_jaw_clench:
+            with open(args.jaw_svm_path, "rb") as f:
+                jaw_svm = pickle.load(f)
+            print(f"[validate] Loaded jaw SVM: {os.path.basename(args.jaw_svm_path)}")
+
         # ── Step 5: Validation loop ────────────────────────────────────────────
         tracked = {"move", "jaw_clench"}
         results = {lbl: {"correct": 0, "total": 0} for lbl in tracked}
+        results["idle"] = {"correct": 0, "total": 0}
 
         stride_samps = int(args.stride * sfreq)
         move_class   = LABEL_MAP["move"]   # 1
@@ -219,35 +289,67 @@ def main():
             if label == "move":
                 n_samps     = data.shape[1]
                 consecutive = 0
+                ring        = deque(maxlen=args.ratio_window)
                 for w0 in range(0, n_samps - N_TIMEPOINTS + 1, stride_samps):
                     window = data[:, w0: w0 + N_TIMEPOINTS]
                     x      = _preprocess_epoch(window, eeg_chs)
                     with torch.no_grad():
-                        out  = model(x)
-                        pred = out.argmax(1).item()
-                    if pred == move_class:
-                        consecutive += 1
-                        if consecutive >= args.concurrent:
-                            correct = True
-                            break
-                    else:
-                        consecutive = 0
+                        hit = model(x).argmax(1).item() == move_class
+                    consecutive = consecutive + 1 if hit else 0
+                    ring.append(int(hit))
+                    if consecutive >= args.concurrent:
+                        correct = True
+                        break
+                    if args.ratio_hits and len(ring) == args.ratio_window and sum(ring) >= args.ratio_hits:
+                        correct = True
+                        break
 
             elif label == "jaw_clench":
-                win_samps   = int(WINDOW_SEC * sfreq)
+                win_samps   = int(WINDOW_SEC * sfreq) if jaw_svm is None else N_TIMEPOINTS
                 consecutive = 0
+                ring        = deque(maxlen=args.ratio_window)
                 for w0 in range(0, data.shape[1] - win_samps + 1, stride_samps):
-                    if detect(data[:, w0: w0 + win_samps], baseline):
-                        consecutive += 1
-                        if consecutive >= args.concurrent:
-                            correct = True
-                            break
+                    window = data[:, w0: w0 + win_samps]
+                    if jaw_svm is not None:
+                        hit = jaw_svm.predict(_jaw_svm_features(window, eeg_chs))[0] == 1
                     else:
-                        consecutive = 0
+                        hit = detect(window, baseline)
+                    consecutive = consecutive + 1 if hit else 0
+                    ring.append(int(hit))
+                    if consecutive >= args.concurrent:
+                        correct = True
+                        break
+                    if args.ratio_hits and len(ring) == args.ratio_window and sum(ring) >= args.ratio_hits:
+                        correct = True
+                        break
 
             results[label]["correct"] += int(correct)
             mark = "✓" if correct else "✗"
             print(f"  {mark}  {label:<14}  onset={onset:7.1f}s")
+
+        # ── Idle (true-negative) check ────────────────────────────────────────
+        val_start = val_anns[0]["onset"]
+        idle_onsets = _find_idle_onsets(
+            all_anns, val_start, raw.times[-1],
+            window_dur=3.0, stride=args.stride,
+        )
+        win_samps_jc = int(WINDOW_SEC * sfreq)
+        print(f"\n  Checking {len(idle_onsets)} idle windows...\n")
+        for onset in idle_onsets:
+            start_s = int(onset * sfreq)
+            end_s   = min(int((onset + 3.0) * sfreq) + 1, raw.n_times)
+            data    = raw.get_data(picks=eeg_chs, start=start_s, stop=end_s)
+
+            x = _preprocess_epoch(data, eeg_chs)
+            with torch.no_grad():
+                pred = model(x).argmax(1).item()
+            jc = detect(data[:, :win_samps_jc], baseline)
+
+            correct = (pred != move_class) and (not jc)
+            results["idle"]["total"]   += 1
+            results["idle"]["correct"] += int(correct)
+            mark = "✓" if correct else "✗"
+            print(f"  {mark}  idle            onset={onset:7.1f}s")
 
     # ── Summary ───────────────────────────────────────────────────────────────
     print("\n" + "=" * 60)

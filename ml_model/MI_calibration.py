@@ -93,6 +93,8 @@ def parse_args():
                    help="Fine-tuning epochs (default: 20)")
     p.add_argument("--lr",              type=float, default=1e-3,
                    help="Learning rate (default: 1e-3)")
+    p.add_argument("--weight-decay",    type=float, default=0.0,
+                   help="L2 weight decay for Adam (default: 0.0)")
     p.add_argument("--skip-collection", action="store_true",
                    help="Skip data collection; use --fif-path instead")
     p.add_argument("--fif-path",        type=str,   default=None,
@@ -108,8 +110,6 @@ def parse_args():
 
 _BG     = (20,  20,  20)
 _WHITE  = (255, 255, 255)
-_YELLOW = (255, 220,  50)
-_CYAN   = (100, 200, 255)
 _GRAY   = (140, 140, 140)
 
 
@@ -370,7 +370,8 @@ def run_finetuning(X: np.ndarray, y: np.ndarray, args) -> str:
             m.train()
 
     optimizer = torch.optim.Adam(
-        filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr
+        filter(lambda p: p.requires_grad, model.parameters()),
+        lr=args.lr, weight_decay=args.weight_decay,
     )
     criterion = nn.NLLLoss()
 
@@ -378,7 +379,7 @@ def run_finetuning(X: np.ndarray, y: np.ndarray, args) -> str:
     y_t = torch.from_numpy(y).long()
     loader = DataLoader(TensorDataset(X_t, y_t), batch_size=8, shuffle=True)
 
-    print(f"[Phase 3] Training {args.train_epochs} epochs on {len(X_t)} trials  lr={args.lr}")
+    print(f"[Phase 3] Training {args.train_epochs} epochs on {len(X_t)} trials  lr={args.lr}  wd={args.weight_decay}")
 
     for ep_idx in range(args.train_epochs):
         ep_loss = 0.0
