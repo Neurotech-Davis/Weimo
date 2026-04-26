@@ -25,13 +25,13 @@ def get_pairs_util(psychopy_files, eeg_files):
     # since we only do each person once a day max, they will always be unique
     pairs = []
 
-    eeg_edf_lookup = {os.path.splitext(f)[0]: f for f in eeg_files if f.endswith('.edf')}
+    eeg_eeg_lookup = {os.path.splitext(f)[0]: f for f in eeg_files if f.endswith(('.edf', '.dsi'))}
     eeg_csv_lookup = {os.path.splitext(f)[0]: f for f in eeg_files if f.endswith('.csv')}
 
     for file in psychopy_files:
         base = os.path.splitext(file)[0].removesuffix('pp')
-        if base in eeg_edf_lookup and base in eeg_csv_lookup:
-            pairs.append((file, eeg_edf_lookup[base], eeg_csv_lookup[base]))
+        if base in eeg_eeg_lookup and base in eeg_csv_lookup:
+            pairs.append((file, eeg_eeg_lookup[base], eeg_csv_lookup[base]))
 
     return pairs
 
@@ -98,7 +98,7 @@ def annotate(pairs, output_folder, eeg_folder, psychopy_folder):
         eeg_file = pair[1]
         eeg_info = pair[2]
         psycho_file = pair[0]
-        # load in the raw
+        # load in the raw (.dsi files from Wearable Sensing are EDF-compatible)
         raw = mne.io.read_raw_edf(f'{eeg_folder}/{eeg_file}', preload=False)
         # get the start time for the eeg data and the psychopy data
         with open(f'{eeg_folder}/{eeg_info}') as f:
@@ -158,7 +158,7 @@ def annotate(pairs, output_folder, eeg_folder, psychopy_folder):
         }
         events, event_id = mne.events_from_annotations(raw, event_id=EVENT_ID)
         print(f"[INFO] {eeg_file}: event_id={event_id}, #_events={len(events)}")
-        eeg_file = eeg_file[:-4] # removes the .edf suffix
+        eeg_file = os.path.splitext(eeg_file)[0]
 
         # save
         raw.save(f'{output_folder}/{eeg_file}.fif', overwrite=True)
