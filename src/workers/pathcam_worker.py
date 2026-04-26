@@ -14,7 +14,7 @@ cam_matrix_usb = np.load(models_dir / "intrinsic_usb.npy")
 cam_matrix_new_usb = np.load(models_dir / "intrinsicNew_usb.npy")
 dist_usb = np.load(models_dir / "dist_usb.npy")
 
-BUILTIN_CAMERA_INDEX = 0
+BUILTIN_CAMERA_INDEX = 1000
 
 
 def get_correct_matrices(index):
