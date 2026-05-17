@@ -1,6 +1,6 @@
 ## src
 
-/src is where we defne the source of truth for the demo. Functions written here have to be conscious of the face that they will be used as concurrent workers by python's `multiprocessing` module. Read contract below for how to adhere to worker semantics.
+/src is where we define the source of truth for the demo. Functions written here have to be conscious of the fact that they will be used as concurrent workers by python's `multiprocessing` module. Read contract below for how to adhere to worker semantics.
 
 ## Installation
 
@@ -15,21 +15,22 @@
 When using a new computer, adjustments need to be made to:
 
 - Default camera index
-- Camera resolution, the shared_memory frame buffer needs to be resized to accomodate.
+- Camera resolution, the shared_state frame buffer needs to be resized to accommodate.
 
 ## Usage
 
 1. Launch the DSI-Streamer GUI and do initial signal checking. Use
    - Guide to debugging common signal quality pitfalls - [DSI Signal Quality YT Video](https://www.youtube.com/watch?v=6juYPfUCEbA)
      - [Link to notes](https://vault.tynerlab.com/College/Clubs/Weimo-DSI-Streamer#signal)
-2. Iniate `dsi2lslGUI`, the LSL data streamer for the DSI-7 headset. _Note_: DSI-Streamer **HAS** to be closed in order to free the COM port for the LSL streamer GUI.
+2. Initiate `dsi2lslGUI`, the LSL data streamer for the DSI-7 headset. _Note_: DSI-Streamer **HAS** to be closed in order to free the COM port for the LSL streamer GUI.
    - [Link to Wearable Sensing Docs](https://support.wearablesensing.com/examples/lsl/gui.html)
    - [Link to dsi2lsl download](https://github.com/labstreaminglayer/App-WearableSensing) - There is a releases page to the left with a zip file with downloads.
+   - (Alternatively, the script in `/src/workers/mock_lsl_test.py` can be used to mock a dsi2lsl stream)
 3. After the dsi2lslGUI is initiated, run the script. From `/src`: `python3 main_process.py`
 
 ## Worker contracts
 
-Workers need to be aware that they are run continously, can be thought of as having a "god-looop". Outputs will not be read unless they write to the `shared_state` parameter, in accordance with the values defined in `/src/core/shared_state.py`.
+Workers need to be aware that they are run continously, can be thought of as having a "god-loop". Outputs will not be read unless they write to the `shared_state` parameter, in accordance with the values defined in `/src/core/shared_state.py`.
 
 - Shared state should be modified for inter-process-communication.
 
