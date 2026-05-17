@@ -1,4 +1,4 @@
-from machine import Pin, I2C, WDT
+from machine import Pin, I2C
 import time
 import math
 import sys
@@ -26,37 +26,12 @@ def init_motor_hat():
         print("ERROR: Motor Hat communication failed")
 
 
-def recover_i2c():
-    """Bit-bang SCL to release a stuck SDA."""
-    sda = Pin(16, Pin.OUT)
-    scl = Pin(17, Pin.OUT)
-    for _ in range(9):
-        scl.value(0)
-        time.sleep_us(10)
-        scl.value(1)
-        time.sleep_us(10)
-    sda.value(1)
-    # Reinit I2C properly
-    global i2c
-    i2c = I2C(0, sda=Pin(16), scl=Pin(17), freq=100000)
-    init_motor_hat()
-
-
 def set_pwm(channel, on, off):
     data = bytearray([on & 0xFF, on >> 8, off & 0xFF, off >> 8])
     try:
         i2c.writeto_mem(PCA9685_ADDR, 0x06 + 4 * channel, data)
     except OSError:
-        print("ERROR: I2C failure — attempting recovery")
-        recover_i2c()
-
-
-# def set_pwm(channel, on, off):
-#     data = bytearray([on & 0xFF, on >> 8, off & 0xFF, off >> 8])
-#     try:
-#         i2c.writeto_mem(PCA9685_ADDR, 0x06 + 4 * channel, data)
-#     except OSError:
-#         pass
+        pass
 
 
 def set_pin(channel, state):
@@ -125,9 +100,6 @@ m4_a.irq(trigger=Pin.IRQ_RISING, handler=make_handler(4, m4_b, True))
 poll_obj = select.poll()
 poll_obj.register(sys.stdin, select.POLLIN)
 
-poll_out = select.poll()
-poll_out.register(sys.stdout, select.POLLOUT)
-
 
 def stop_all_motors():
     for i in range(1, 5):
@@ -192,8 +164,8 @@ def drive_distance(target_meters):
         ticks[i] = 0
 
     Kp = 5.0
-    min_speed = 600
-    max_speed = 900  # Lowered for stable SNR
+    max_speed = 1100  # Lowered for stable SNR
+    min_speed = 800
     accel_rate = 20
     current_speed = 0
     loop_count = 0
@@ -207,7 +179,6 @@ def drive_distance(target_meters):
     )
 
     while True:
-        wdt.feed()
         if poll_obj.poll(0):
             if sys.stdin.readline().strip() == "STOP":
                 stop_all_motors()
@@ -223,12 +194,11 @@ def drive_distance(target_meters):
 
         loop_count += 1
         if loop_count % 5 == 0:
-            if poll_out.poll(0):
-                print(
-                    f"TICKS | M1(R):{abs(ticks[1]):>4} M2(R):{abs(ticks[2]):>4} "
-                    f"M3(L):{abs(ticks[3]):>4} M4(L):{abs(ticks[4]):>4} "
-                    f"| Dist: {avg_ticks:.0f}/{target_ticks:.0f}"
-                )
+            print(
+                f"TICKS | M1(R):{abs(ticks[1]):>4} M2(R):{abs(ticks[2]):>4} "
+                f"M3(L):{abs(ticks[3]):>4} M4(L):{abs(ticks[4]):>4} "
+                f"| Dist: {avg_ticks:.0f}/{target_ticks:.0f}"
+            )
 
         if abs(error) < 25:
             break
@@ -266,7 +236,7 @@ def turn_robot(degrees):
     current_speed = 0
     loop_count = 0
 
-    timeout_ms = max(3000, int(abs(degrees) * 50))
+    timeout_ms = max(3000, int(abs(degrees) * 70))
     start_time = time.ticks_ms()
 
     print(
@@ -274,7 +244,6 @@ def turn_robot(degrees):
     )
 
     while True:
-        wdt.feed()
         if poll_obj.poll(0):
             if sys.stdin.readline().strip() == "STOP":
                 break
@@ -288,12 +257,11 @@ def turn_robot(degrees):
 
         loop_count += 1
         if loop_count % 5 == 0:
-            if poll_out.poll(0):
-                print(
-                    f"TICKS | M1(R):{abs(ticks[1]):>4} M2(R):{abs(ticks[2]):>4} "
-                    f"M3(L):{abs(ticks[3]):>4} M4(L):{abs(ticks[4]):>4} "
-                    f"| Turn: {avg_ticks:.0f}/{target_ticks:.0f}"
-                )
+            print(
+                f"TICKS | M1(R):{abs(ticks[1]):>4} M2(R):{abs(ticks[2]):>4} "
+                f"M3(L):{abs(ticks[3]):>4} M4(L):{abs(ticks[4]):>4} "
+                f"| Turn: {avg_ticks:.0f}/{target_ticks:.0f}"
+            )
 
         if abs(error) < 25:
             break
@@ -320,20 +288,30 @@ def turn_robot(degrees):
 
 
 # --- MAIN LOOP ---
-init_motor_hat()
-wdt = WDT(timeout=8000)
-try:
-    while True:
-        wdt.feed()
-        if poll_obj.poll(0):
-            cmd = sys.stdin.readline().strip()
-            if cmd.startswith("DRIVE:"):
-                drive_distance(float(cmd.split(":")[1]))
-            elif cmd.startswith("TURN:"):
-                turn_robot(float(cmd.split(":")[1]))
-            elif cmd == "STOP":
-                stop_all_motors()
-                print("OK:STOPPED")
-        time.sleep(0.1)
-except KeyboardInterrupt:
-    stop_all_motors()
+def run_robot():
+    init_motor_hat()
+    try:
+        while True:
+            if poll_obj.poll(0):
+                cmd = sys.stdin.readline().strip()
+                if cmd.startswith("DRIVE:"):
+                    drive_distance(float(cmd.split(":")[1]))
+                elif cmd.startswith("TURN:"):
+                    turn_robot(float(cmd.split(":")[1]))
+                elif cmd == "STOP":
+                    stop_all_motors()
+                    print("OK:STOPPED")
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        stop_all_motors()
+
+
+# Global supervisor to prevent REPL drop
+while True:
+    try:
+        run_robot()
+    except KeyboardInterrupt:
+        # If a glitch sends Ctrl+C, just restart the robot logic
+        stop_all_motors()
+        print("RECOVERY: Restarting main loop...")
+        time.sleep(0.5)
